@@ -19,9 +19,9 @@ int main()
     cpu.mem[0x9000] = 0x00;
     cpu.mem[0x9001] = 0xa0;
     cpu.mem[0xa000] = ADC_IMM;
-    cpu.mem[0xa001] = 0x0a;
+    cpu.mem[0xa001] = 0x09;
     cpu.mem[0xa002] = ADC_IMM;
-    cpu.mem[0xa003] = 0x0b;
+    cpu.mem[0xa003] = 0x05;
     cpu.mem[0xa004] = JMP_IMM;
     cpu.mem[0xa005] = 0x00;
     cpu.mem[0xa006] = 0x80;
@@ -47,15 +47,15 @@ int cpu_exec(cpu_6502 *cpu)
     case BRK:
     {
         int num_cycles = 7;
-        cpu->i = 1; // indicate interrupt
-        word tmp = cpu->pc + 2;
-        cpu->mem[cpu->sp | 0x100] = tmp & 0xff;
-        cpu->sp--;
-        cpu->mem[cpu->sp | 0x100] = (tmp >> 8) & 0xff;
-        cpu->sp--;
-        cpu->mem[cpu->sp | 0x100] = cpu->sr;
-        cpu->sp--;
-        usleep(num_cycles * CPU_CYCLE_USEC); // hacky way to do it but assume that the host CPU is much faster
+        cpu->i = 1;                                    // indicate interrupt
+        word tmp = cpu->pc + 2;                        // cycle 1
+        cpu->mem[cpu->sp | 0x100] = tmp & 0xff;        // 2
+        cpu->sp--;                                     // 3
+        cpu->mem[cpu->sp | 0x100] = (tmp >> 8) & 0xff; // 4
+        cpu->sp--;                                     // 5
+        cpu->mem[cpu->sp | 0x100] = cpu->sr;           // 6
+        cpu->sp--;                                     // 7
+        usleep(num_cycles * CPU_CYCLE_USEC);           // hacky way to do it but assume that the host CPU is much faster
         break;
     }
 
@@ -208,13 +208,19 @@ int cpu_exec(cpu_6502 *cpu)
             byte a = cpu->a;
             int num_six = (a >> 4) & 0xf;
             num_six += (val >> 4) & 0xf;
-            word tmp = a + val + cpu->c - num_six * 6; // adjust for hex addition
+            printf("Operands: A = 0x%02x Imm = 0x%02x C = 0x%02x Six = %d Res = ", a, val, cpu->c, num_six);
+            word tmp = a + val + cpu->c ;//- num_six * 6; // adjust for hex addition
+            int res = ((val & 0xf) + (a & 0xf) + cpu->c);
+            tmp -= (res / 10) * 10;
+            tmp += 0x10 * (res / 10);
+            printf("0x%04x\n", tmp);
             if (tmp > 99 || tmp < 0)
                 cpu->c = 1;
             if ((tmp & 0xff) == 0)
                 cpu->z = 0;
             if (tmp & 0x80)
                 cpu->n = 1;
+            cpu->a = tmp & 0xff;
         }
         usleep(num_cycles * CPU_CYCLE_USEC);
         break;
