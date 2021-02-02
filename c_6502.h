@@ -200,3 +200,9 @@ typedef enum
  * @return int Status flag of the instruction, including error codes for debug
  */
 int cpu_exec(cpu_6502 *cpu);
+/**
+ * @brief Reset the 6502 CPU. Clears all registers and flags, and sets
+ * PC to contents of V_RESET.
+ * 
+ */
+void cpu_reset(cpu_6502 *cpu);

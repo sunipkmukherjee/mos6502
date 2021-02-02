@@ -4,6 +4,42 @@
 #include <unistd.h>
 #include "c_6502.h"
 
+#ifdef UNIT_TEST
+int main()
+{
+    cpu_6502 cpu;
+    // Point reset vector to 0x8000
+    cpu.mem[V_RESET] = 0x00;
+    cpu.mem[V_RESET + 1] = 0x80;
+    // store your program at 0x8000
+    cpu.mem[0x8000] = NOP;
+    cpu.mem[0x8001] = JMP_INDIRECT;
+    cpu.mem[0x8002] = 0x00;
+    cpu.mem[0x8003] = 0x90;
+    cpu.mem[0x9000] = 0x00;
+    cpu.mem[0x9001] = 0xa0;
+    cpu.mem[0xa000] = ADC_IMM;
+    cpu.mem[0xa001] = 0x0a;
+    cpu.mem[0xa002] = ADC_IMM;
+    cpu.mem[0xa003] = 0x0b;
+    cpu.mem[0xa004] = JMP_IMM;
+    cpu.mem[0xa005] = 0x00;
+    cpu.mem[0xa006] = 0x80;
+    printf("Press enter to reset CPU: ");
+    getchar();
+    cpu_reset(&cpu);
+    while (1)
+    {
+        printf("CPU Registers:\nA = 0x%02x X = 0x%02x Y = 0x%02x\nNV-BDIZCJ\n%d%d%d%d%d%d%d%d%d\nPC: 0x%04x SP: 0x%02x Next OP: 0x%02x\n", cpu.a, cpu.x, cpu.y, cpu.n, cpu.v, cpu.rsvd, cpu.b, cpu.d, cpu.i, cpu.z, cpu.c, cpu.last_jmp, cpu.pc, cpu.sp, cpu.mem[cpu.pc]);
+        printf("Press enter to execute instruction: ");
+        getchar();
+        printf("\n\n");
+        cpu_exec(&cpu);
+    }
+    return 0;
+}
+#endif
+
 int cpu_exec(cpu_6502 *cpu)
 {
     switch (cpu->mem[cpu->pc])
@@ -345,39 +381,3 @@ case INSTR:
     break;
 }
 */
-
-#ifdef UNIT_TEST
-int main()
-{
-    cpu_6502 cpu;
-    // Point reset vector to 0x8000
-    cpu.mem[V_RESET] = 0x00;
-    cpu.mem[V_RESET + 1] = 0x80;
-    // store your program at 0x8000
-    cpu.mem[0x8000] = NOP;
-    cpu.mem[0x8001] = JMP_INDIRECT;
-    cpu.mem[0x8002] = 0x00;
-    cpu.mem[0x8003] = 0x90;
-    cpu.mem[0x9000] = 0x00;
-    cpu.mem[0x9001] = 0xa0;
-    cpu.mem[0xa000] = ADC_IMM;
-    cpu.mem[0xa001] = 0x0a;
-    cpu.mem[0xa002] = ADC_IMM;
-    cpu.mem[0xa003] = 0x0b;
-    cpu.mem[0xa004] = JMP_IMM;
-    cpu.mem[0xa005] = 0x00;
-    cpu.mem[0xa006] = 0x80;
-    printf("Press enter to reset CPU: ");
-    getchar();
-    cpu_reset(&cpu);
-    while (1)
-    {
-        printf("CPU Registers:\nA = 0x%02x X = 0x%02x Y = 0x%02x\nNV-BDIZCJ\n%d%d%d%d%d%d%d%d%d\nPC: 0x%04x SP: 0x%02x Next OP: 0x%02x\n", cpu.a, cpu.x, cpu.y, cpu.n, cpu.v, cpu.rsvd, cpu.b, cpu.d, cpu.i, cpu.z, cpu.c, cpu.last_jmp, cpu.pc, cpu.sp, cpu.mem[cpu.pc]);
-        printf("Press enter to execute instruction: ");
-        getchar();
-        printf("\n\n");
-        cpu_exec(&cpu);
-    }
-    return 0;
-}
-#endif
