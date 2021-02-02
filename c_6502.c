@@ -49,12 +49,12 @@ int cpu_exec(cpu_6502 *cpu)
         int num_cycles = 7;
         cpu->i = 1; // indicate interrupt
         word tmp = cpu->pc + 2;
-        cpu->sp++;
         cpu->mem[cpu->sp | 0x100] = tmp & 0xff;
-        cpu->sp++;
+        cpu->sp--;
         cpu->mem[cpu->sp | 0x100] = (tmp >> 8) & 0xff;
-        cpu->sp++;
+        cpu->sp--;
         cpu->mem[cpu->sp | 0x100] = cpu->sr;
+        cpu->sp--;
         usleep(num_cycles * CPU_CYCLE_USEC); // hacky way to do it but assume that the host CPU is much faster
         break;
     }
@@ -107,8 +107,8 @@ int cpu_exec(cpu_6502 *cpu)
     case PHP:
     {
         int num_cycles = 3;
-        cpu->sp++;
         cpu->mem[cpu->sp | 0x100] = cpu->sr;
+        cpu->sp--;
         usleep(num_cycles * CPU_CYCLE_USEC);
         break;
     }
@@ -363,7 +363,7 @@ int cpu_exec(cpu_6502 *cpu)
 void cpu_reset(cpu_6502 *cpu)
 {
     cpu->sr = 0;
-    cpu->sp = 0;
+    cpu->sp = 0xff; // stack pointer starts at the bottom
     cpu->a = 0;
     cpu->x = 0;
     cpu->y = 0;
