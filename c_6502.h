@@ -106,6 +106,8 @@ typedef enum
      */
     ORA_X_IND = 0x01,
     ORA_ZPG = 0x05,
+    ORA_IMM = 0x09,
+    ORA_MEM = 0x0d,
     /**
      * @brief Shift Left One Bit (Memory or Accumulator)
      * 
@@ -121,6 +123,8 @@ typedef enum
      * absolute,X    ASL oper,X    1E    3     7
      */
     ASL_ZPG = 0x06,
+    ASL_A = 0x0a,
+    ASL_MEM = 0x0e,
     /**
      * @brief Push Processor Status on Stack
      * 
@@ -133,10 +137,6 @@ typedef enum
      * 
      */
     PHP = 0x08,
-    ORA_IMM = 0x09,
-    ASL_A = 0x0a,
-    ORA_MEM = 0x0d,
-    ASL_MEM = 0x0e,
     /**
      * @brief ADC  Add Memory to Accumulator with Carry
      * 
