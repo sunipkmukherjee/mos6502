@@ -1,11 +1,14 @@
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef uint16_t word;
 typedef uint8_t byte;
 
 const uint32_t CPU_CYCLE_USEC = 1; // 1 microseconds per cycle
 
-const uint32_t MAX_MEM_SZ = 1024 * 64;
+#define MAX_MEM_SZ 1024*64
 
 const word V_NMI = 0xfffa; // mem loc for NMI handler
 
@@ -18,7 +21,7 @@ const word V_IRQ_BRK = 0xfffe; // mem loc for IRQ
 typedef struct __attribute__((packed))
 {
     uint16_t pc; // program counter
-    uint16_t sp; // stack pointer
+    uint8_t sp; // stack pointer
 
     uint8_t a, x, y; // registers
 
@@ -206,3 +209,6 @@ int cpu_exec(cpu_6502 *cpu);
  * 
  */
 void cpu_reset(cpu_6502 *cpu);
+#ifdef __cplusplus
+}
+#endif

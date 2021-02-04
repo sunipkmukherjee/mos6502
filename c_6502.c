@@ -47,9 +47,13 @@ static inline void impl_adc(cpu_6502 *cpu, byte val)
         // ref: http://teaching.idallen.com/cst8214/08w/notes/overflow.txt
         // take care of overflow flag
         byte a = cpu->a;
+#ifdef MOS_DEBUG
         printf("Operands: A = 0x%02x Imm = 0x%02x C = 0x%02x Res = ", a, val, cpu->c);
+#endif
         word tmp = a + val + cpu->c;
+#ifdef MOS_DEBUG
         printf("0x%04x\n", tmp);
+#endif
         byte sgna = (a & 0x80);
         byte sgn = sgna ^ (val & 0x80); // 0 if same, 1 if not
         if (!sgn)                       // same
@@ -70,12 +74,16 @@ static inline void impl_adc(cpu_6502 *cpu, byte val)
         byte a = cpu->a;
         int num_six = (a >> 4) & 0xf;
         num_six += (val >> 4) & 0xf;
+#ifdef MOS_DEBUG
         printf("Operands: A = 0x%02x Imm = 0x%02x C = 0x%02x Six = %d Res = ", a, val, cpu->c, num_six);
+#endif
         word tmp = a + val + cpu->c; //- num_six * 6; // adjust for hex addition
         int res = ((val & 0xf) + (a & 0xf) + cpu->c);
         tmp -= (res / 10) * 10;
         tmp += 0x10 * (res / 10);
+#ifdef MOS_DEBUG
         printf("0x%04x\n", tmp);
+#endif
         if (tmp > 99 || tmp < 0)
             cpu->c = 1;
         if ((tmp & 0xff) == 0)
@@ -92,7 +100,9 @@ int cpu_exec(cpu_6502 *cpu)
     {
     case ADC_IMM:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: ADC_IMM ");
+#endif
         int num_cycles = 2;
         cpu->pc++; // prepare for next operand
         byte val = cpu->mem[cpu->pc];
@@ -104,7 +114,9 @@ int cpu_exec(cpu_6502 *cpu)
 
     case ADC_ZPG:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: ADC_ZPG ");
+#endif
         int num_cycles = 3;
         cpu->pc++; // prepare for next operand
         byte val = cpu->mem[cpu->mem[cpu->pc]];
@@ -116,7 +128,9 @@ int cpu_exec(cpu_6502 *cpu)
 
     case ADC_MEM:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: ADC_MEM ");
+#endif
         int num_cycles = 4;
         cpu->pc++; // prepare for next operand
         word addr = cpu->mem[cpu->pc];
@@ -164,7 +178,7 @@ int cpu_exec(cpu_6502 *cpu)
         word addr = cpu->mem[cpu->pc]; // LO addr
         cpu->pc++;
         addr += cpu->mem[cpu->pc] * 0x16; // HI addr
-        cpu->c = 0x80 & cpu->mem[addr];   // set carry
+        cpu->c = (0x80 & cpu->mem[addr]) >> 7;   // set carry
         cpu->mem[addr] <<= 1;             // shift left by 1
         byte val = cpu->mem[addr];
         if (!val) // check zero flag
@@ -192,14 +206,18 @@ int cpu_exec(cpu_6502 *cpu)
 
     case JMP_IMM:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: JMP_IMM ");
+#endif
         int num_cycles = 3;
         cpu->pc++;                     // prepare for next operand
         word addr = cpu->mem[cpu->pc]; // low byte of immediate addr
         cpu->pc++;
         addr += cpu->mem[cpu->pc] * 256; // high byte of immediate addr
         cpu->pc = addr;
+#ifdef MOS_DEBUG
         printf("Loc: 0x%04x\n", addr);
+#endif
         cpu->last_jmp = 1;
         usleep(num_cycles * CPU_CYCLE_USEC);
         break;
@@ -207,16 +225,22 @@ int cpu_exec(cpu_6502 *cpu)
 
     case JMP_INDIRECT:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: JMP_INDIRECT ");
+#endif
         int num_cycles = 5;
         cpu->pc++;                     // prepare for next operand
         word addr = cpu->mem[cpu->pc]; // low byte of immediate addr
         cpu->pc++;
         addr += cpu->mem[cpu->pc] * 256; // high byte of immediate addr
+#ifdef MOS_DEBUG
         printf("Addr: 0x%04x ", addr);
+#endif
         addr = cpu->mem[addr] + cpu->mem[addr + 1] * 256;
         cpu->pc = addr;
+#ifdef MOS_DEBUG
         printf("Loc: 0x%04x\n", addr);
+#endif
         cpu->last_jmp = 1;
         usleep(num_cycles * CPU_CYCLE_USEC);
         break;
@@ -224,7 +248,9 @@ int cpu_exec(cpu_6502 *cpu)
 
     case NOP:
     {
+#ifdef MOS_DEBUG
         printf("Instruction: NOP\n");
+#endif
         int num_cycles = 2;
         usleep(num_cycles * CPU_CYCLE_USEC);
         break;
