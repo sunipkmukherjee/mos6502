@@ -500,7 +500,7 @@ typedef enum
      * N-----ZC
      */
     ANC = 0x0b,
-    ANC = 0x2b,
+    ANC_ = 0x2b,
 
     /**
      * @brief ALR, A:= (A & #{imm}) << 2
