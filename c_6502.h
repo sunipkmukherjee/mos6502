@@ -43,6 +43,12 @@ typedef struct __attribute__((packed))
 
     byte mem[MAX_MEM_SZ];
 
+    byte halt; // indicate HLT/KIL
+    byte instr; // current instruction
+    char cycle; // current cycle
+    char irq_cycle; // interrupt cycle
+    word infer_addr; // inferred address, temporary storage only
+    byte tmp; // temporary register
     byte last_jmp; // indicate if last instruction was a jump
 } cpu_6502;
 
@@ -73,27 +79,23 @@ typedef struct __attribute__((packed))
  * 
  * ZPG_Y -> operand is zeropage address, effective address is ZPG incremented by Y without carry
  * 
+ *
+ * MOS6502 complete instruction set, ref http://www.oxyron.de/html/opcodes02.html
+ * 
  */
 typedef enum
 {
+    /************ ARITHMATIC ************/
     /**
-     * @brief Force break
-     * 
-     *  interrupt,                       N Z C I D V
-     *  push PC+2, push SR               - - - 1 - -
-     *
-     * addressing    assembler    opc  bytes  cyles
-     * --------------------------------------------
-     * implied       BRK           00    1     7
-     * 
+     * @brief OR Accumulator, A:= A | {adr}
+     * N-----Z-
      */
-    BRK = 0x00,
     /**
-     * @brief OR Memory with Accumulator
+     * ORA  OR Memory with Accumulator
      * 
      * A OR M -> A                      N Z C I D V
      *                                  + + - - - -
-     *
+     * 
      * addressing    assembler    opc  bytes  cyles
      * --------------------------------------------
      * immidiate     ORA #oper     09    2     2
@@ -104,80 +106,271 @@ typedef enum
      * absolute,Y    ORA oper,Y    19    3     4*
      * (indirect,X)  ORA (oper,X)  01    2     6
      * (indirect),Y  ORA (oper),Y  11    2     5*
-     * 
-     * * -> Add one cycle if page boundary is crossed
      */
-    ORA_X_IND = 0x01,
-    ORA_ZPG = 0x05,
     ORA_IMM = 0x09,
-    ORA_MEM = 0x0d,
+    ORA_ZP = 0x05,
+    ORA_ZPX = 0x15,
+    ORA_IZX = 0x01,
+    ORA_IZY = 0x11,
+    ORA_ABS = 0x0d,
+    ORA_ABX = 0x1d,
+    ORA_ABY = 0x19,
     /**
-     * @brief Shift Left One Bit (Memory or Accumulator)
-     * 
-     * C <- [76543210] <- 0             N Z C I D V
-     *                                  + + + - - -
-     *
-     * addressing    assembler    opc  bytes  cyles
-     * --------------------------------------------
-     * accumulator   ASL A         0A    1     2
-     * zeropage      ASL oper      06    2     5
-     * zeropage,X    ASL oper,X    16    2     6
-     * absolute      ASL oper      0E    3     6
-     * absolute,X    ASL oper,X    1E    3     7
+     * @brief AND Accumulaotor, A:= A & {adr}
+     * N-----Z-
      */
-    ASL_ZPG = 0x06,
-    ASL_A = 0x0a,
-    ASL_MEM = 0x0e,
+    AND_IMM = 0x9 + 0x20,
+    AND_ZP = 0x5 + 0x20,
+    AND_ZPX = 0x15 + 0x20,
+    AND_IZX = 0x1 + 0x20,
+    AND_IZY = 0x11 + 0x20,
+    AND_ABS = 0x0d + 0x20,
+    AND_ABX = 0x1d + 0x20,
+    AND_ABY = 0x19 + 0x20,
     /**
-     * @brief Push Processor Status on Stack
-     * 
-     * push SR                          N Z C I D V
-     *                                  - - - - - -
-     * 
-     * addressing    assembler    opc  bytes  cyles
-     * --------------------------------------------
-     * implied       PHP           08    1     3
-     * 
+     * @brief EOR, A:= A ^ {adr}
+     * N-----Z-
      */
-    PHP = 0x08,
+    EOR_IMM = 0x09 + 0x40,
+    EOR_ZP  = 0x05 + 0x40,
+    EOR_ZPX = 0x15 + 0x40,
+    EOR_IZX = 0x01 + 0x40,
+    EOR_IZY = 0x11 + 0x40,
+    EOR_ABS = 0x0d + 0x40,
+    EOR_ABX = 0x1d + 0x40,
+    EOR_ABY = 0x19 + 0x40,
     /**
-     * @brief ADC  Add Memory to Accumulator with Carry
-     * 
-     * A + M + C -> A, C                N Z C I D V
-     *                                  + + + - - +
-     * 
-     * addressing    assembler    opc  bytes  cyles
-     * --------------------------------------------
-     * immidiate     ADC #oper     69    2     2
-     * zeropage      ADC oper      65    2     3
-     * zeropage,X    ADC oper,X    75    2     4
-     * absolute      ADC oper      6D    3     4
-     * absolute,X    ADC oper,X    7D    3     4*
-     * absolute,Y    ADC oper,Y    79    3     4*
-     * (indirect,X)  ADC (oper,X)  61    2     6
-     * (indirect),Y  ADC (oper),Y  71    2     5*
-     * 
+     * @brief ADC Accumulator, A:= A + {adr}
+     * NV----ZC
      */
-    ADC_IMM = 0x69,
-    ADC_ZPG = 0x65,
-    ADC_ZPG_X = 0x75,
-    ADC_MEM = 0x6d,
-    ADC_MEM_X = 0x7d,
-    ADC_MEM_Y = 0x79,
-    ADC_X_IND = 0x61,
-    ADC_Y_IND = 0x71,
+    ADC_IMM = 0x09 + 0x60,
+    ADC_ZP  = 0x05 + 0x60,
+    ADC_ZPX = 0x15 + 0x60,
+    ADC_IZX = 0x01 + 0x60,
+    ADC_IZY = 0x11 + 0x60,
+    ADC_ABS = 0x0d + 0x60,
+    ADC_ABX = 0x1d + 0x60,
+    ADC_ABY = 0x19 + 0x60,
     /**
-     * @brief NOP  No Operation
-     * 
-     *  ---                              N Z C I D V
-     *                                  - - - - - -
-     * 
-     * addressing    assembler    opc  bytes  cyles
-     * --------------------------------------------
-     * implied       NOP           EA    1     2
-     * 
+     * @brief SBC Accumulator, A:= A - {adr}
+     * NV----ZC
      */
-    NOP = 0xea,
+    SBC_IMM = 0x09 + 0xe0,
+    SBC_ZP  = 0x05 + 0xe0,
+    SBC_ZPX = 0x15 + 0xe0,
+    SBC_IZX = 0x01 + 0xe0,
+    SBC_IZY = 0x11 + 0xe0,
+    SBC_ABS = 0x0d + 0xe0,
+    SBC_ABX = 0x1d + 0xe0,
+    SBC_ABY = 0x19 + 0xe0,
+    /**
+     * @brief CMP Accumulator, A - {adr}
+     * N-----ZC
+     */
+    CMP_IMM = 0x09 + 0xc0,
+    CMP_ZP  = 0x05 + 0xc0,
+    CMP_ZPX = 0x15 + 0xc0,
+    CMP_IZX = 0x01 + 0xc0,
+    CMP_IZY = 0x11 + 0xc0,
+    CMP_ABS = 0x0d + 0xc0,
+    CMP_ABX = 0x1d + 0xc0,
+    CMP_ABY = 0x19 + 0xc0,
+    /**
+     * @brief CPX X, X - {adr}
+     * N-----ZC
+     */
+    CPX_IMM = 0xe0,
+    CPX_ZPX = 0xe4,
+    CPX_ABS = 0xec,
+    /**
+     * @brief CPY Y, Y - {adr}
+     * N-----ZC
+     */
+    CPY_IMM = 0xc0,
+    CPY_ZPX = 0xc4,
+    CPY_ABS = 0xcc,
+    /**
+     * @brief DEC {adr}:= {adr} - 1
+     * N-----Z-
+     */
+    DEC_ZP  = 0xc6,
+    DEC_ZPX = 0xd6,
+    DEC_ABS = 0xce,
+    DEC_ABX = 0xde,
+    /**
+     * @brief DEX X:= X - 1
+     * N-----Z-
+     */
+    DEX = 0xca,
+    /**
+     * @brief DEY Y:= Y - 1
+     * N-----Z-
+     */
+    DEY = 0x88,
+    /**
+     * @brief INC {adr}:= {adr} + 1
+     * N-----Z-
+     */
+    INC_ZP  = 0xc6 + 0x20,
+    INC_ZPX = 0xd6 + 0x20,
+    INC_ABS = 0xce + 0x20,
+    INC_ABX = 0xde + 0x20,
+    /**
+     * @brief INX X:= X + 1
+     * N-----Z-
+     */
+    INX = 0xe8,
+    /**
+     * @brief INY Y:= Y + 1
+     * N-----Z-
+     */
+    INY = 0xc8,
+    /**
+     * @brief ASL, {adr}:= {adr} << 2 (shift left)
+     * N-----ZC
+     */
+    ASL     = 0x0a,
+    ASL_ZP  = 0x06,
+    ASL_ZPX = 0x16,
+    ASL_ABS = 0x0e,
+    ASL_ABX = 0x1e,
+    /**
+     * @brief ROL, {adr}:= {adr} << 2 + C (rotate left)
+     * N-----ZC
+     */
+    ROL     = 0x0a + 0x20,
+    ROL_ZP  = 0x06 + 0x20,
+    ROL_ZPX = 0x16 + 0x20,
+    ROL_ABS = 0x0e + 0x20,
+    ROL_ABX = 0x1e + 0x20,
+    /**
+     * @brief LSR, {adr}:= {adr} >> 2 (shift right)
+     * N-----ZC
+     */
+    LSR     = 0x0a + 0x40,
+    LSR_ZP  = 0x06 + 0x40,
+    LSR_ZPX = 0x16 + 0x40,
+    LSR_ABS = 0x0e + 0x40,
+    LSR_ABX = 0x1e + 0x40,
+    /**
+     * @brief ROL, {adr}:= {adr} << 2 + C (rotate left)
+     * N-----ZC
+     */
+    ROR     = 0x0a + 0x60,
+    ROR_ZP  = 0x06 + 0x60,
+    ROR_ZPX = 0x16 + 0x60,
+    ROR_ABS = 0x0e + 0x60,
+    ROR_ABX = 0x1e + 0x60,
+    /************ ARITHMATIC ************/
+
+    /*************** MOVE ***************/
+    /**
+     * @brief LDA, A:= {adr}
+     * N-----Z-
+     */ 
+    LDA_IMM = 0xa9,
+    LDA_ZP  = 0xa5,
+    LDA_ZPX = 0xb5,
+    LDA_IZX = 0xa1,
+    LDA_IZY = 0xb1,
+    LDA_ABS = 0xad,
+    LDA_ABX = 0xbd,
+    LDA_ABY = 0xb9,
+    /**
+     * @brief STA, {adr}:= A
+     * --------
+     */ 
+    STA_ZP  = 0xa5 - 0x20,
+    STA_ZPX = 0xb5 - 0x20,
+    STA_IZX = 0xa1 - 0x20,
+    STA_IZY = 0xb1 - 0x20,
+    STA_ABS = 0xad - 0x20,
+    STA_ABX = 0xbd - 0x20,
+    STA_ABY = 0xb9 - 0x20,
+    /**
+     * @brief LDX, X:= {adr}
+     * N-----Z-
+     */ 
+    LDX_IMM = 0xa2,
+    LDX_ZP  = 0xa6,
+    LDX_ZPY = 0xb6,
+    LDX_ABS = 0xae,
+    LDX_ABY = 0xbe,
+    /**
+     * @brief STX, {adr}:= X
+     * --------
+     */ 
+    STX_ZP  = 0xa6,
+    STX_ZPY = 0xb6,
+    STX_ABS = 0xae,
+    /**
+     * @brief LDY, Y:= {adr}
+     * N-----Z-
+     */ 
+    LDY_IMM = 0xa2 - 0x02,
+    LDY_ZP  = 0xa6 - 0x02,
+    LDY_ZPY = 0xb6 - 0x02,
+    LDY_ABS = 0xae - 0x02,
+    LDY_ABY = 0xbe - 0x02,
+    /**
+     * @brief STY, {adr}:= Y
+     * --------
+     */ 
+    STY_ZP  = 0xa6 - 0x22,
+    STY_ZPY = 0xb6 - 0x22,
+    STY_ABS = 0xae - 0x22,
+    /**
+     * @brief Transfer commands, T{1}{2}, {2}:= {1}
+     * N-----Z-
+     */
+    TAX = 0xaa, // X:= A
+    TXA = TAX - 0x20, // A:= X
+    TAY = 0xa8, // Y:= A
+    TYA = TAY - 0x10, // A:= Y
+    TSX = 0xba, // X:= S
+    TXS = TSX - 0x20, // S:= X, no flags affected
+    PLA = 0x68, // A:= +(S)
+    PHA = PLA - 0x20, // (S)-:= A, no flags affected
+    PLP = 0x28, // P:= +(S), all flags affected (push to stack)
+    PHP = 0x08, // (S) -:= P
+    /*************** MOVE ***************/
+
+    /*************** JUMP ***************/
+    // Branch flags
+    // no flags affected
+    BPL = 0x10, // branch on N = 0
+    BMI = 0x30, // branch on N = 1
+    BVC = 0x50, // branch on V = 0
+    BVS = 0x70, // branch on V = 1
+    BCC = 0x90, // branch on C = 0
+    BCS = 0xb0, // branch on C = 1
+    BNE = 0xd0, // branch on Z = 0
+    BEQ = 0xf0, // branch on Z = 1
+    /**
+     * @brief BRK, software interrupt
+     * (S)-:=PC,P
+     * PC:=($FFFE)
+     */
+    BRK = 0x00,
+    /**
+     * @brief RTI, return from subroutine call
+     * P, PC:=+(S) [affects all flags]
+     */
+    RTI = 0x40,
+    /**
+     * @brief JSR, jump to subroutine
+     * S-:=PC, PC:={adr}
+     */
+    JSR = 0x20,
+    /**
+     * @brief RTS, return from subroutine
+     * PC:=+(S)
+     */
+    RTS = 0x60,
+    /**
+     * @brief JMP, jump to address
+     * PC:= {adr}
+     */
     /**
      * @brief JMP  Jump to New Location
      * 
@@ -190,10 +383,193 @@ typedef enum
      * indirect      JMP (oper)    6C    3     5
      * 
      */
-    JMP_IMM = 0x4c,
-    JMP_INDIRECT = 0x6c,
+    JMP_ABS = 0x4c, // absolute address
+    JMP_IND = 0x6c, // indirect address
+    /**
+     * @brief N:=b7 V:=b6 Z:=A & {adr}
+     * NV----Z-
+     */
+    BIT_ZP  = 0x24,
+    BIT_ABS = 0x2c,
+    CLC = 0x18, // C:= 0
+    SEC = 0x38, // C:= 1
+    CLD = 0xd8, // D:= 0
+    SED = 0xf8, // D:= 1
+    CLI = 0x58, // I:= 0
+    SEI = 0x78, // I:= 1
+    CLV = 0xb8, // V:= 0
+    NOP = 0xea, // no operations
+    /*************** JUMP ***************/
 
-} cpu_instr;
+    /************* ILLEGAL **************/
+    
+    /**
+     * @brief SLO, {adr}:={adr} << 2, A:=A | {adr}
+     * N-----ZC
+     */
+    SLO_ZP  = 0x07,
+    SLO_ZPX = 0x17,
+    SLO_IZX = 0x03,
+    SLO_IZY = 0x13,
+    SLO_ABS = 0x0f,
+    SLO_ABX = 0x1f,
+    SLO_ABY = 0x1b,
+
+    /**
+     * @brief RLA, {adr}:={adr} rotate left, A:=A & {adr}
+     * N-----ZC
+     */
+    RLA_ZP  = 0x07 + 0x20,
+    RLA_ZPX = 0x17 + 0x20,
+    RLA_IZX = 0x03 + 0x20,
+    RLA_IZY = 0x13 + 0x20,
+    RLA_ABS = 0x0f + 0x20,
+    RLA_ABX = 0x1f + 0x20,
+    RLA_ABY = 0x1b + 0x20,
+
+    /**
+     * @brief SRE, {adr}:={adr} >> 2, A:=A ^ {adr}
+     * N-----ZC
+     */
+    SRE_ZP  = 0x07 + 0x40,
+    SRE_ZPX = 0x17 + 0x40,
+    SRE_IZX = 0x03 + 0x40,
+    SRE_IZY = 0x13 + 0x40,
+    SRE_ABS = 0x0f + 0x40,
+    SRE_ABX = 0x1f + 0x40,
+    SRE_ABY = 0x1b + 0x40,
+
+    /**
+     * @brief RRA, {adr}:={adr} rotate right, A:=A (ADC) {adr}
+     * NV----ZC
+     */
+    RRA_ZP  = 0x07 + 0x60,
+    RRA_ZPX = 0x17 + 0x60,
+    RRA_IZX = 0x03 + 0x60,
+    RRA_IZY = 0x13 + 0x60,
+    RRA_ABS = 0x0f + 0x60,
+    RRA_ABX = 0x1f + 0x60,
+    RRA_ABY = 0x1b + 0x60,
+
+    /**
+     * @brief SAX, {adr}:= A & X
+     * --------
+     */
+    SAX_ZP  = 0x87,
+    SAX_ZPY = 0x97,
+    SAX_IZX = 0x83,
+    SAX_ABS = 0x8f,
+
+    /**
+     * @brief SAX, {adr}:= A & X
+     * N-----Z-
+     */
+    LAX_ZP  = 0x87 + 0x20,
+    LAX_ZPY = 0x97 + 0x20,
+    LAX_IZX = 0x83 + 0x20,
+    LAX_IZY = 0x93 + 0x20,
+    LAX_ABS = 0x8f + 0x20,
+    LAX_ABY = 0x9f + 0x20,
+
+    /**
+     * @brief DCP, {adr}:={adr} - 1, A-{adr}
+     * N-----ZC
+     */
+    DCP_ZP  = 0xc7,
+    DCP_ZPX = 0xd7,
+    DCP_IZX = 0xc3,
+    DCP_IZY = 0xd3,
+    DCP_ABS = 0xcf,
+    DCP_ABX = 0xdf,
+    DCP_ABY = 0xdb,
+
+    /**
+     * @brief DCP, {adr}:={adr} + 1, A:= A-{adr}
+     * NV----ZC
+     */
+    ISC_ZP  = 0xc7 + 0x20,
+    ISC_ZPX = 0xd7 + 0x20,
+    ISC_IZX = 0xc3 + 0x20,
+    ISC_IZY = 0xd3 + 0x20,
+    ISC_ABS = 0xcf + 0x20,
+    ISC_ABX = 0xdf + 0x20,
+    ISC_ABY = 0xdb + 0x20,
+
+    /**
+     * @brief ANC, A:= A & #{imm}
+     * N-----ZC
+     */
+    ANC = 0x0b,
+    ANC = 0x2b,
+
+    /**
+     * @brief ALR, A:= (A & #{imm}) << 2
+     * N-----ZC
+     */
+    ALR = 0x4b,
+
+    /**
+     * @brief ARR, A:= (A & #{imm}) >> 2
+     * NV----ZC
+     */
+    ARR = 0x6b,
+
+    /**
+     * @brief XAA (highly unstable), A:= X & #{imm}
+     * N-----Z-
+     */
+    XAA = 0x8b,
+
+    /**
+     * @brief LAX (highly unstable), A, X:= #{imm}
+     * N-----Z-
+     */
+    LAX = 0xab,
+
+    /**
+     * @brief AXS, X:= A & X  - #{imm}
+     * N-----ZC, CMP and DEX at same time, C set like CMP
+     */
+    AXS = 0xcb,
+
+    /**
+     * @brief SBC, A:= A - #{imm}
+     * NV-----ZC
+     */
+    SBC = 0xeb,
+
+    /**
+     * @brief AHX, {adr}:= A & X & H
+     * no flags affected, unstable in certain conditions
+     */
+    AHX_IZY = 0x93,
+    AHX_ABY = 0x9f,
+
+    /**
+     * @brief SHY, {adr}:= Y & H
+     * no flags affected, unstable in certain conditions
+     */
+    SHY = 0x9c,
+
+    /**
+     * @brief SHX, {adr}:= X & H
+     * no flags affected, unstable in certain conditions
+     */
+    SHX = 0x9e,
+
+    /**
+     * @brief TAS, S:= A & X, {adr}:= S & H
+     * 
+     */
+    TAS = 0x9b,
+
+    /**
+     * @brief LAS, A, X, S:= {adr} & S
+     * N-----Z-
+     */
+    LAS = 0xbb,
+    /************* ILLEGAL **************/
+} MOS6502_INSTR;
 
 /**
  * @brief Execute the current instruction in memory at address PC
