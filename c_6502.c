@@ -297,6 +297,7 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 cpu->i = 1; // disable IRQ while in NMI ISR
                 cpu->b = 0; // forget break
+                cpu->nmi = 0; // clear the nmi
                 cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
             }
         }
