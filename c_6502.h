@@ -31,7 +31,7 @@ typedef struct __attribute__((packed))
         {
             unsigned c : 1; // carry
             unsigned z : 1; // zero
-            unsigned i : 1; // interrupt disable
+            unsigned i : 1; // interrupt disable, this bit is set on power up
             unsigned d : 1; // decimal
             unsigned b : 1; // break
             unsigned rsvd : 1;
@@ -42,7 +42,8 @@ typedef struct __attribute__((packed))
     };
 
     byte mem[MAX_MEM_SZ];
-
+    byte nmi; // NMI signal
+    byte irq; // IRQ signal
     byte halt; // indicate HLT/KIL
     byte instr; // current instruction
     char cycle; // current cycle
