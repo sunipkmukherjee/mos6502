@@ -278,6 +278,7 @@ int cpu_exec(cpu_6502 *cpu)
             }
             else if (4 == cpu->irq_cycle++)
             {
+                cpu->b = 0;
                 cpu->mem[0x100 + cpu->sp] = cpu->sr; // push status register
                 cpu->sp--;
                 return 1;
@@ -293,9 +294,13 @@ int cpu_exec(cpu_6502 *cpu)
                 return 1;
             }
             else if (7 == cpu->irq_cycle)
+            {
+                cpu->i = 1; // disable IRQ while in NMI ISR
+                cpu->b = 0; // forget break
                 cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
+            }
         }
-        else if (!cpu->i && cpu->irq) // level triggered
+        else if ((!cpu->i && cpu->irq) || cpu->b) // level triggered
         {
             if (0 == cpu->irq_cycle++)
             {
@@ -319,6 +324,8 @@ int cpu_exec(cpu_6502 *cpu)
             }
             else if (4 == cpu->irq_cycle++)
             {
+                if (!cpu->i && cpu->irq)
+                    cpu->b = 0; // break bit is cleared, causes brk to be lost
                 cpu->mem[0x100 + cpu->sp] = cpu->sr; // push status register
                 cpu->sp--;
                 return 1;
@@ -334,7 +341,11 @@ int cpu_exec(cpu_6502 *cpu)
                 return 1;
             }
             else if (7 == cpu->irq_cycle)
+            {
+                cpu->i = 1; // interrupt is disabled for servicing
+                cpu->b = 0; // break bit is cleared
                 cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
+            }
         }
         cpu->instr = cpu->mem[cpu->pc]; // fetch current instruction
     }
@@ -2130,7 +2141,6 @@ int cpu_exec(cpu_6502 *cpu)
         break;
     }
 
-
     case ASL:
     {
         if (0 == cpu->cycle++)
@@ -2932,7 +2942,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (3 == cpu->cycle++)
         {
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0;                // clear cycles
+            cpu->cycle = 0; // clear cycles
         }
         break;
     }
@@ -2954,7 +2964,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (3 == cpu->cycle++)
         {
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0;                       // clear cycles
+            cpu->cycle = 0; // clear cycles
         }
         break;
     }
@@ -3080,7 +3090,7 @@ int cpu_exec(cpu_6502 *cpu)
         break;
     }
 
-    /*************** MOVE ***************/
+        /*************** MOVE ***************/
     }
 }
 
