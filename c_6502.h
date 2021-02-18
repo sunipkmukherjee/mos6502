@@ -27,18 +27,7 @@ extern "C"
     const byte CYC_T6 = 7;
     const byte CYC_T7 = 8;
 
-    const char *CYCLE_NAME_6502[] =
-    {
-        "INVALID",
-        "T0",
-        "T1",
-        "T2",
-        "T3",
-        "T4",
-        "T5",
-        "T6",
-        "T7"
-    };
+    extern const char *CYCLE_NAME_6502[];
 
     typedef struct __attribute__((packed))
     {

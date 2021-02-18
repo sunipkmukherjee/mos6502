@@ -43,6 +43,18 @@ int main()
 }
 #endif
 
+const char *CYCLE_NAME_6502[] =
+    {
+        "INVALID",
+        "T0",
+        "T1",
+        "T2",
+        "T3",
+        "T4",
+        "T5",
+        "T6",
+        "T7"};
+
 static inline byte impl_fetch(cpu_6502 *cpu, word addr)
 {
     return cpu->mem[addr];
@@ -535,12 +547,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -570,7 +584,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_ora(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -586,12 +600,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ora(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -607,7 +621,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -617,7 +631,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_ora(cpu, val);            // perform OR
             cpu->cycle = CYC_T0;           // clear cycles
         }
@@ -634,17 +648,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_ora(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -661,12 +677,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -677,14 +695,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_ora(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ora(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -701,12 +719,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -717,14 +737,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_ora(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ora(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -740,7 +760,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -755,7 +775,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -776,15 +796,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -793,7 +813,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_ora(cpu, val);
                 cpu->cycle = CYC_T0;
             }
@@ -801,7 +821,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ora(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -818,7 +838,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_and(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -834,12 +854,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_and(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -855,7 +875,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -865,7 +885,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_and(cpu, val);            // perform OR
             cpu->cycle = CYC_T0;           // clear cycles
         }
@@ -882,17 +902,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_and(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -909,12 +931,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -925,14 +949,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_and(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_and(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -949,12 +973,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -965,14 +991,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_and(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_and(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -988,7 +1014,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -1003,7 +1029,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -1024,15 +1050,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -1041,7 +1067,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_and(cpu, val);
                 cpu->cycle = CYC_T0;
             }
@@ -1049,7 +1075,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_and(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1066,7 +1092,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_eor(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1082,12 +1108,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_eor(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1103,7 +1129,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -1113,7 +1139,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_eor(cpu, val);            // perform OR
             cpu->cycle = CYC_T0;           // clear cycles
         }
@@ -1130,17 +1156,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_eor(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -1157,12 +1185,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1173,14 +1203,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_eor(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_eor(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1197,12 +1227,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1213,14 +1245,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_eor(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_eor(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1236,7 +1268,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -1251,7 +1283,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -1272,15 +1304,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -1289,7 +1321,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_eor(cpu, val);
                 cpu->cycle = CYC_T0;
             }
@@ -1297,7 +1329,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_eor(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1314,7 +1346,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0;
         }
@@ -1330,12 +1362,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1351,7 +1383,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -1361,7 +1393,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1378,17 +1410,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1405,12 +1439,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1421,14 +1457,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 0);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0;
         }
@@ -1445,12 +1481,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1461,14 +1499,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 0);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0;
         }
@@ -1484,7 +1522,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -1499,7 +1537,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -1520,15 +1558,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -1537,7 +1575,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 0);
                 cpu->cycle = CYC_T0;
             }
@@ -1545,7 +1583,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 0);
             cpu->cycle = CYC_T0;
         }
@@ -1562,7 +1600,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0;
         }
@@ -1578,12 +1616,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1599,7 +1637,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -1609,7 +1647,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1626,17 +1664,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1653,12 +1693,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1669,14 +1711,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 1);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0;
         }
@@ -1693,12 +1735,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1709,14 +1753,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 1);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0;
         }
@@ -1732,7 +1776,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -1747,7 +1791,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -1768,15 +1812,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -1785,7 +1829,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_adc_sbc(cpu, val, 1);
                 cpu->cycle = CYC_T0;
             }
@@ -1793,7 +1837,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_adc_sbc(cpu, val, 1);
             cpu->cycle = CYC_T0;
         }
@@ -1810,7 +1854,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1826,12 +1870,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1847,7 +1891,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -1857,7 +1901,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1874,17 +1918,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -1901,12 +1947,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1917,14 +1965,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_cma(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1941,12 +1989,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -1957,14 +2007,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_cma(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -1980,7 +2030,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -1995,7 +2045,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -2016,15 +2066,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -2033,7 +2083,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_cma(cpu, val);
                 cpu->cycle = CYC_T0;
             }
@@ -2041,7 +2091,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_cma(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -2058,7 +2108,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_cmx(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -2074,7 +2124,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2084,7 +2134,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_cmx(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -2101,17 +2151,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_cmx(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -2128,7 +2180,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_cmy(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -2144,7 +2196,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2154,7 +2206,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_cmy(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -2171,17 +2223,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_cmy(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -2198,12 +2252,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2213,7 +2267,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2228,7 +2282,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2239,7 +2293,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2249,7 +2303,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2265,17 +2319,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2285,7 +2341,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2301,12 +2357,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2319,7 +2377,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -2329,7 +2387,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2377,12 +2435,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2392,7 +2450,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2407,7 +2465,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2418,7 +2476,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2428,7 +2486,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2444,17 +2502,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2464,7 +2524,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2480,12 +2540,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2498,7 +2560,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -2508,7 +2570,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2571,12 +2633,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2586,7 +2648,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2601,7 +2663,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2612,7 +2674,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2622,7 +2684,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2638,17 +2700,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2658,7 +2722,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2674,12 +2738,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2692,7 +2758,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -2702,7 +2768,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2733,12 +2799,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2748,7 +2814,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2763,7 +2829,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2774,7 +2840,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2784,7 +2850,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2800,17 +2866,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2820,7 +2888,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2836,12 +2904,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2854,7 +2924,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -2864,7 +2934,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2895,12 +2965,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -2910,7 +2980,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2925,7 +2995,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -2936,7 +3006,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2946,7 +3016,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2962,17 +3032,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -2982,7 +3054,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -2998,12 +3070,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3016,7 +3090,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -3026,7 +3100,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3056,12 +3130,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3071,7 +3145,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3086,7 +3160,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3097,7 +3171,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -3107,7 +3181,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3123,17 +3197,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T5 == cpu->cycle)
         {
@@ -3143,7 +3219,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3159,12 +3235,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3177,7 +3255,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T5 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -3187,7 +3265,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T7 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3205,7 +3283,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_lda(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3221,12 +3299,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_lda(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -3242,7 +3320,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3252,7 +3330,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->tmp]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->tmp); // obtain value from memory
             impl_lda(cpu, val);            // perform OR
             cpu->cycle = CYC_T0;           // clear cycles
         }
@@ -3269,17 +3347,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_lda(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -3296,12 +3376,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3312,14 +3394,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_lda(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_lda(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3336,12 +3418,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3352,14 +3436,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_lda(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_lda(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3375,7 +3459,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -3390,7 +3474,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
-            cpu->tmp = cpu->mem[cpu->infer_addr];
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
         }
         else if (CYC_T6 == cpu->cycle)
         {
@@ -3411,15 +3495,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -3428,7 +3512,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_lda(cpu, val);
                 cpu->cycle = CYC_T0;
             }
@@ -3436,7 +3520,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_lda(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3453,12 +3537,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3473,7 +3557,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3484,7 +3568,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3500,17 +3584,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3526,12 +3612,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3543,7 +3631,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0;
         }
         break;
@@ -3559,12 +3647,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3576,7 +3666,7 @@ int cpu_exec(cpu_6502 *cpu)
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0;
         }
         break;
@@ -3591,7 +3681,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -3611,7 +3701,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->tmp;
+            impl_write(cpu, cpu->infer_addr, cpu->tmp);
             cpu->cycle = CYC_T0;
         }
         break;
@@ -3626,15 +3716,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -3645,7 +3735,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T6 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->a;
+            impl_write(cpu, cpu->infer_addr, cpu->a);
             cpu->cycle = CYC_T0;
         }
         break;
@@ -3661,7 +3751,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_ldx(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3677,12 +3767,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ldx(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -3698,7 +3788,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3709,7 +3799,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
             impl_ldx(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -3726,17 +3816,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_ldx(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -3753,12 +3845,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3769,14 +3863,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_ldx(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ldx(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3792,7 +3886,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->pc++];
+            byte val = impl_fetch(cpu, cpu->pc++);
             impl_ldy(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3808,12 +3902,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ldy(cpu, val);
             cpu->cycle = CYC_T0; // clear cycles
         }
@@ -3829,7 +3923,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3840,7 +3934,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from memory
             impl_ldy(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -3857,17 +3951,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            byte val = impl_fetch(cpu, cpu->infer_addr); // obtain value from inferred location
             impl_ldy(cpu, val);                   // perform OR
             cpu->cycle = CYC_T0;                  // clear cycles
         }
@@ -3884,12 +3980,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -3900,14 +3998,14 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
+                byte val = impl_fetch(cpu, cpu->infer_addr);
                 impl_ldy(cpu, val);
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
+            byte val = impl_fetch(cpu, cpu->infer_addr);
             impl_ldy(cpu, val);
             cpu->cycle = CYC_T0;
         }
@@ -3924,12 +4022,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->x;
+            impl_write(cpu, cpu->infer_addr, cpu->x);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3944,7 +4042,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -3955,7 +4053,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->x;
+            impl_write(cpu, cpu->infer_addr, cpu->x);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3971,17 +4069,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->x;
+            impl_write(cpu, cpu->infer_addr, cpu->x);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -3997,12 +4097,12 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->y;
+            impl_write(cpu, cpu->infer_addr, cpu->y);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -4017,7 +4117,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
         }
         else if (CYC_T3 == cpu->cycle)
         {
@@ -4028,7 +4128,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->y;
+            impl_write(cpu, cpu->infer_addr, cpu->y);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -4044,17 +4144,19 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->mem[cpu->infer_addr] = cpu->y;
+            impl_write(cpu, cpu->infer_addr, cpu->y);
             cpu->cycle = CYC_T0; // clear cycles
         }
         break;
@@ -4888,12 +4990,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -4915,12 +5019,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -4949,12 +5055,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -4982,7 +5090,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5018,15 +5126,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -5103,12 +5211,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5130,12 +5240,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5164,12 +5276,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5197,7 +5311,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5233,15 +5347,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -5318,12 +5432,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5345,12 +5461,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5379,12 +5497,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5412,7 +5532,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5448,15 +5568,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -5533,12 +5653,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5560,12 +5682,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5594,12 +5718,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5627,7 +5753,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5663,15 +5789,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -5746,12 +5872,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5771,7 +5899,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5856,12 +5984,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5883,12 +6013,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -5916,7 +6048,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -5952,15 +6084,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -6037,12 +6169,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6064,12 +6198,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6098,12 +6234,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6131,7 +6269,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -6167,15 +6305,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -6252,12 +6390,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6279,12 +6419,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6313,12 +6455,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
@@ -6346,7 +6490,7 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
@@ -6382,15 +6526,15 @@ int cpu_exec(cpu_6502 *cpu)
         else if (CYC_T2 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
         }
         else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+            cpu->infer_addr = impl_fetch(cpu, cpu->tmp); // store the lo address
         }
         else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
-            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+            cpu->infer_addr = ((word)impl_fetch(cpu, cpu->tmp++)) << 8;; // store the hi address, note zero page is not crossed
         }
         else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
@@ -6611,12 +6755,14 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->infer_addr = 0x0;
-            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+            cpu->tmp = impl_fetch(cpu, cpu->pc++);
+            cpu->infer_addr |= cpu->tmp; // obtain low byte of address
         }
         else if (CYC_T3 == cpu->cycle)
         {
             cpu->cycle++;
-            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+            cpu->tmp = ((word)impl_fetch(cpu, cpu->pc++));
+            cpu->infer_addr |= cpu->tmp << 8; // obtain high byte and calculate address
         }
         else if (CYC_T4 == cpu->cycle)
         {
