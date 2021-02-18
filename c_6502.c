@@ -13,25 +13,27 @@ int main()
     cpu.mem[V_RESET] = 0x00;
     cpu.mem[V_RESET + 1] = 0x80;
     // store your program at 0x8000
-    cpu.mem[0x8000] = NOP;
-    cpu.mem[0x8001] = JMP_INDIRECT;
-    cpu.mem[0x8002] = 0x00;
-    cpu.mem[0x8003] = 0x90;
+    cpu.mem[0x8000] = LDA_IMM;
+    cpu.mem[0x8001] = 0x0;
+    cpu.mem[0x8002] = NOP;
+    cpu.mem[0x8003] = JMP_IND;
+    cpu.mem[0x8004] = 0x00;
+    cpu.mem[0x8005] = 0x90;
     cpu.mem[0x9000] = 0x00;
     cpu.mem[0x9001] = 0xa0;
     cpu.mem[0xa000] = ADC_IMM;
     cpu.mem[0xa001] = 0x09;
     cpu.mem[0xa002] = ADC_IMM;
     cpu.mem[0xa003] = 0x05;
-    cpu.mem[0xa004] = JMP_IMM;
-    cpu.mem[0xa005] = 0x00;
+    cpu.mem[0xa004] = JMP_ABS;
+    cpu.mem[0xa005] = 0x02;
     cpu.mem[0xa006] = 0x80;
     printf("Press enter to reset CPU: ");
     getchar();
     cpu_reset(&cpu);
     while (1)
     {
-        printf("CPU Registers:\nA = 0x%02x X = 0x%02x Y = 0x%02x\nNV-BDIZCJ\n%d%d%d%d%d%d%d%d%d\nPC: 0x%04x SP: 0x%02x Next OP: 0x%02x\n", cpu.a, cpu.x, cpu.y, cpu.n, cpu.v, cpu.rsvd, cpu.b, cpu.d, cpu.i, cpu.z, cpu.c, cpu.last_jmp, cpu.pc, cpu.sp, cpu.mem[cpu.pc]);
+        printf("CPU Cycle: %d | IRQ Cycle: %d\nCPU Registers:\nA = 0x%02x X = 0x%02x Y = 0x%02x\nNV-BDIZC\n%d%d%d%d%d%d%d%d\nPC: 0x%04x SP: 0x%02x OP: 0x%02x\n", cpu.cycle, cpu.irq_cycle, cpu.a, cpu.x, cpu.y, cpu.n, cpu.v, cpu.rsvd, cpu.b, cpu.d, cpu.i, cpu.z, cpu.c, cpu.pc, cpu.sp, cpu.instr);
         printf("Press enter to execute instruction: ");
         getchar();
         printf("\n\n");
@@ -41,6 +43,33 @@ int main()
 }
 #endif
 
+static inline byte impl_fetch(cpu_6502 *cpu, word addr)
+{
+    return cpu->mem[addr];
+}
+
+static inline word impl_fetch_word(cpu_6502 *cpu, word addr)
+{
+    word val = impl_fetch(cpu, addr + 1);
+    val <<= 8;
+    val |= impl_fetch(cpu, addr);
+    return val;
+}
+
+static inline void impl_write(cpu_6502 *cpu, word addr, byte val)
+{
+    cpu->mem[addr] = val;
+}
+
+static inline void instr_fetch(cpu_6502 *cpu)
+{
+    if (CYC_T0 == cpu->cycle)
+    {
+        cpu->cycle++;
+        cpu->instr = impl_fetch(cpu, cpu->pc);
+    }
+    // printf("%s: PC: 0x%04x | INSTR: 0x%02x | Cycle: %d\n", __func__, cpu->pc, cpu->instr, cpu->cycle);
+}
 // ref: http://forum.6502.org/viewtopic.php?f=3&t=3083&p=35119&hilit=mike+chambers#p35119, verilog code
 static inline void impl_adc_sbc(cpu_6502 *cpu, byte val, bool sbc)
 {
@@ -250,105 +279,150 @@ static inline byte impl_ror(cpu_6502 *cpu, byte val)
     return val;
 }
 
+static inline word impl_sgn_ofst(word v1, byte v2)
+{
+    return v1 + v2 + (((v2 & 0x80) == 0x80) ? 0xff00 : 0x0); // signed addition
+}
+
+void cpu_reset(cpu_6502 *cpu)
+{
+    cpu->irq_cycle = 0;
+    cpu->rst = 1;
+}
+
+void cpu_nmi(cpu_6502 *cpu)
+{
+    cpu->nmi = 1;
+}
+
+void cpu_irq(cpu_6502 *cpu, byte val)
+{
+    cpu->irq = (val == 0);
+}
+
 int cpu_exec(cpu_6502 *cpu)
 {
-    if (cpu->cycle == 0) // at t = 0, fetch new instruction
+    if (cpu->rst) // reset line
+    {
+        if (7 == ++cpu->irq_cycle) // 7th cycle
+        {
+            cpu->nmi = 0;
+            cpu->irq = 0;
+            cpu->a = rand();
+            cpu->x = 0x0;
+            cpu->y = 0x0;
+            cpu->sp = 0xfd;
+            cpu->sr = 0;
+            cpu->rsvd = 1;
+            cpu->pc = impl_fetch_word(cpu, V_RESET);
+            cpu->cycle = CYC_T0;
+            cpu->irq_cycle = 0;
+            cpu->rst = 0; // clear reset
+            return 1;
+        }
+        else
+            return 1;
+    }
+    if (cpu->cycle > CYC_T7)
+        cpu->cycle = CYC_IN;  // this is KIL
+    if (cpu->cycle == CYC_T0) // at t = 0, fetch new instruction
     {
         if (cpu->nmi) // non maskable interrupt
         {
-            if (0 == cpu->irq_cycle++)
+            if (0 == cpu->irq_cycle)
             {
+                cpu->irq_cycle++;
                 return 1;
             }
-            else if (1 == cpu->irq_cycle++)
+            else if (1 == cpu->irq_cycle)
             {
-                return 1;
-            }
-            else if (2 == cpu->irq_cycle++)
-            {
-                cpu->mem[0x100 + cpu->sp] = cpu->pc; // lo byte
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->pc); // lo byte
                 cpu->sp--;
                 return 1;
             }
-            else if (3 == cpu->irq_cycle++)
+            else if (2 == cpu->irq_cycle)
             {
-                cpu->mem[0x100 + cpu->sp] = cpu->pc >> 8; // hi byte
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->pc >> 8); // hi byte
                 cpu->sp--;
                 return 1;
             }
-            else if (4 == cpu->irq_cycle++)
+            else if (3 == cpu->irq_cycle)
             {
-                cpu->b = 0;
-                cpu->mem[0x100 + cpu->sp] = cpu->sr; // push status register
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->sr);
                 cpu->sp--;
                 return 1;
             }
-            else if (5 == cpu->irq_cycle++)
+            else if (4 == cpu->irq_cycle)
             {
-                cpu->pc = 0x0 | cpu->mem[V_NMI];
-                return 1;
-            }
-            else if (6 == cpu->irq_cycle++)
-            {
-                cpu->pc |= ((word)cpu->mem[V_NMI + 1]) << 8;
-                return 1;
-            }
-            else if (7 == cpu->irq_cycle)
-            {
-                cpu->i = 1; // disable IRQ while in NMI ISR
-                cpu->b = 0; // forget break
-                cpu->nmi = 0; // clear the nmi
-                cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
-            }
-        }
-        else if ((!cpu->i && cpu->irq) || cpu->b) // level triggered
-        {
-            if (0 == cpu->irq_cycle++)
-            {
-                return 1;
-            }
-            else if (1 == cpu->irq_cycle++)
-            {
-                return 1;
-            }
-            else if (2 == cpu->irq_cycle++)
-            {
-                cpu->mem[0x100 + cpu->sp] = cpu->pc; // lo byte
-                cpu->sp--;
-                return 1;
-            }
-            else if (3 == cpu->irq_cycle++)
-            {
-                cpu->mem[0x100 + cpu->sp] = cpu->pc >> 8; // hi byte
-                cpu->sp--;
-                return 1;
-            }
-            else if (4 == cpu->irq_cycle++)
-            {
-                if (!cpu->i && cpu->irq)
-                    cpu->b = 0; // break bit is cleared, causes brk to be lost
-                cpu->mem[0x100 + cpu->sp] = cpu->sr; // push status register
-                cpu->sp--;
-                return 1;
-            }
-            else if (5 == cpu->irq_cycle++)
-            {
+                cpu->irq_cycle++;
                 cpu->pc = 0x0 | cpu->mem[V_IRQ_BRK];
                 return 1;
             }
-            else if (6 == cpu->irq_cycle++)
+            else if (5 == cpu->irq_cycle)
             {
+                cpu->irq_cycle++;
                 cpu->pc |= ((word)cpu->mem[V_IRQ_BRK + 1]) << 8;
                 return 1;
             }
-            else if (7 == cpu->irq_cycle)
+            else if (6 == cpu->irq_cycle)
             {
-                cpu->i = 1; // interrupt is disabled for servicing
-                cpu->b = 0; // break bit is cleared
+                cpu->i = 1;         // interrupt is disabled for servicing
+                cpu->b = 0;         // break bit is cleared
+                cpu->nmi = 0;       // clear nmi indicator
                 cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
             }
         }
-        cpu->instr = cpu->mem[cpu->pc]; // fetch current instruction
+        else if ((!cpu->i && cpu->irq)) // level triggered
+        {
+            if (0 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                return 1;
+            }
+            else if (1 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->pc); // lo byte
+                cpu->sp--;
+                return 1;
+            }
+            else if (2 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->pc >> 8); // hi byte
+                cpu->sp--;
+                return 1;
+            }
+            else if (3 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                impl_write(cpu, 0x100 + cpu->sp, cpu->sr);
+                cpu->sp--;
+                return 1;
+            }
+            else if (4 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                cpu->pc = 0x0 | cpu->mem[V_IRQ_BRK];
+                return 1;
+            }
+            else if (5 == cpu->irq_cycle)
+            {
+                cpu->irq_cycle++;
+                cpu->pc |= ((word)cpu->mem[V_IRQ_BRK + 1]) << 8;
+                return 1;
+            }
+            else if (6 == cpu->irq_cycle)
+            {
+                cpu->i = 1;         // interrupt is disabled for servicing
+                cpu->b = 0;         // break bit is cleared
+                cpu->irq_cycle = 0; // clear interrupt cycle and fetch ISR instruction
+            }
+        }
+        instr_fetch(cpu); // fetch current instruction
     }
     switch (cpu->instr)
     {
@@ -365,10 +439,11 @@ int cpu_exec(cpu_6502 *cpu)
     case 0xb2:
     case 0xd2:
     case 0xf2:
-        cpu->halt = 1; // indicate KILL
-        return -1;
+    {
+        cpu->cycle++; // after 7 cycles, cpu->cycle will become 0, which is invalid
         break;
-    // NOP or NOP IMM
+    }
+    // NOP 2
     case 0x80:
     case 0x82:
     case 0x89:
@@ -382,112 +457,221 @@ int cpu_exec(cpu_6502 *cpu)
     case 0xe2:
     case NOP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
-            cpu->cycle = 0;
+            cpu->cycle++;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
-    // TODO: NOP 3, 4, 4*
+    // NOP 3
+    case 0x04:
+    case 0x44:
+    case 0x64:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    // NOP 4
+    case 0x14:
+    case 0x34:
+    case 0x54:
+    case 0x74:
+    case 0xd4:
+    case 0xf4:
+    case 0x0c:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    // NOP 4*
+    case 0x1c:
+    case 0x3c:
+    case 0x5c:
+    case 0x7c:
+    case 0xdc:
+    case 0xfc:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+            if (offset < 0xff)         // page boundary not crossed
+            {
+                byte val = cpu->mem[cpu->infer_addr];
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            byte val = cpu->mem[cpu->infer_addr];
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
     /************ ARITHMATIC ************/
     case ORA_IMM:
     {
-        if (0 == cpu->cycle++) // cycle 0, increment program counter, cycle counter
+        if (CYC_T1 == cpu->cycle++) // cycle 0, increment program counter, cycle counter
         {
             cpu->pc++;
         }
-        else if (1 == cpu->cycle)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_ora(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ORA_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_ora(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ORA_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_ora(cpu, val);            // perform OR
-            cpu->cycle = 0;                // clear cycles
+            cpu->cycle = CYC_T0;           // clear cycles
         }
         break;
     }
     case ORA_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_ora(cpu, val);                   // perform OR
-            cpu->cycle = 0;                       // clear cycles
+            cpu->cycle = CYC_T0;                  // clear cycles
         }
         break;
     }
     case ORA_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -496,34 +680,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_ora(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_ora(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ORA_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -532,69 +720,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_ora(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_ora(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ORA_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_ora(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ORA_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -603,112 +796,130 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_ora(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_ora(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case AND_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_and(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case AND_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_and(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case AND_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_and(cpu, val);            // perform OR
-            cpu->cycle = 0;                // clear cycles
+            cpu->cycle = CYC_T0;           // clear cycles
         }
         break;
     }
     case AND_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_and(cpu, val);                   // perform OR
-            cpu->cycle = 0;                       // clear cycles
+            cpu->cycle = CYC_T0;                  // clear cycles
         }
         break;
     }
     case AND_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -717,34 +928,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_and(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_and(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case AND_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -753,69 +968,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_and(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_and(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case AND_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_and(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case AND_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -824,112 +1044,130 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_and(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_and(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case EOR_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_eor(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case EOR_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_eor(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case EOR_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_eor(cpu, val);            // perform OR
-            cpu->cycle = 0;                // clear cycles
+            cpu->cycle = CYC_T0;           // clear cycles
         }
         break;
     }
     case EOR_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_eor(cpu, val);                   // perform OR
-            cpu->cycle = 0;                       // clear cycles
+            cpu->cycle = CYC_T0;                  // clear cycles
         }
         break;
     }
     case EOR_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -938,34 +1176,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_eor(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_eor(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case EOR_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -974,69 +1216,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_eor(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_eor(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case EOR_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_eor(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case EOR_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1045,112 +1292,130 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_eor(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_eor(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case ADC_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ADC_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ADC_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ADC_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ADC_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1159,34 +1424,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 0);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ADC_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1195,69 +1464,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 0);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ADC_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ADC_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1266,112 +1540,130 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 0);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 0);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case SBC_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case SBC_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case SBC_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case SBC_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case SBC_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1380,34 +1672,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 1);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case SBC_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1416,69 +1712,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 1);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case SBC_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case SBC_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1487,112 +1788,130 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_adc_sbc(cpu, val, 1);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_adc_sbc(cpu, val, 1);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case CMP_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_cma(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CMP_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_cma(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case CMP_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_cma(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case CMP_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_cma(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case CMP_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1601,34 +1920,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_cma(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_cma(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CMP_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1637,69 +1960,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_cma(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_cma(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CMP_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_cma(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CMP_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -1708,979 +2036,1160 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_cma(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_cma(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case CPX_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_cmx(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CPX_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_cmx(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case CPX_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_cmx(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case CPY_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_cmy(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case CPY_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_cmy(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case CPY_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_cmy(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case DEC_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_dec(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case DEC_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_dec(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case DEC_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_dec(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case DEC_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_dec(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case DEX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->x = impl_dec(cpu, cpu->x);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case DEY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->y = impl_dec(cpu, cpu->y);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case INC_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_inc(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case INC_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_inc(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case INC_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_inc(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case INC_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_inc(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case INX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->x = impl_inc(cpu, cpu->x);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case INY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->y = impl_inc(cpu, cpu->y);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case ASL:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->a = impl_asl(cpu, cpu->a);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ASL_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_asl(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ASL_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_asl(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ASL_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_asl(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ASL_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_asl(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case LSR:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->a = impl_lsr(cpu, cpu->a);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case LSR_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_lsr(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case LSR_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_lsr(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case LSR_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_lsr(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case LSR_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_lsr(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
 
     case ROL:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->a = impl_rol(cpu, cpu->a);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ROL_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_rol(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROL_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_rol(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROL_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_rol(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROL_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_rol(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROR:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->a = impl_rol(cpu, cpu->a);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case ROR_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_ror(cpu, cpu->tmp);
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROR_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_ror(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROR_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_ror(cpu, cpu->tmp);
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case ROR_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++)
+        else if (CYC_T5 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->infer_addr]; // obtain value from memory
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = impl_ror(cpu, cpu->tmp);
         }
-        else if (6 == cpu->cycle++)
+        else if (CYC_T7 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
@@ -2689,98 +3198,115 @@ int cpu_exec(cpu_6502 *cpu)
     /*************** MOVE ***************/
     case LDA_IMM:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->pc++];
             impl_lda(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case LDA_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_lda(cpu, val);
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case LDA_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->tmp]; // obtain value from memory
             impl_lda(cpu, val);            // perform OR
-            cpu->cycle = 0;                // clear cycles
+            cpu->cycle = CYC_T0;           // clear cycles
         }
         break;
     }
     case LDA_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
             impl_lda(cpu, val);                   // perform OR
-            cpu->cycle = 0;                       // clear cycles
+            cpu->cycle = CYC_T0;                  // clear cycles
         }
         break;
     }
     case LDA_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -2789,34 +3315,38 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_lda(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_lda(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case LDA_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -2825,69 +3355,74 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_lda(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             byte val = cpu->mem[cpu->infer_addr];
             impl_lda(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case LDA_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->mem[cpu->infer_addr];
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->tmp;
             impl_lda(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case LDA_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
@@ -2896,468 +3431,3213 @@ int cpu_exec(cpu_6502 *cpu)
             {
                 byte val = cpu->mem[cpu->infer_addr];
                 impl_lda(cpu, val);
-                cpu->cycle = 0;
+                cpu->cycle = CYC_T0;
             }
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             byte val = cpu->mem[cpu->infer_addr];
             impl_lda(cpu, val);
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
     case STA_ZP:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case STA_ZPX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp += cpu->x; // increment by X without carry, always in zero page
             cpu->infer_addr = cpu->tmp;
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case STA_ABS:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0; // clear cycles
+            cpu->cycle = CYC_T0; // clear cycles
         }
         break;
     }
     case STA_ABX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->x;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case STA_ABY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr = 0x0;
             cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
         }
-        else if (2 == cpu->cycle++)
+        else if (CYC_T3 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
         }
-        else if (3 == cpu->cycle++)
+        else if (CYC_T4 == cpu->cycle)
         {
+            cpu->cycle++;
             // calculate effective address
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (4 == cpu->cycle++) // page boundary crossed
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case STA_IZX:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = 0x0;
             byte tmp = cpu->tmp + cpu->x; // without carry
             cpu->infer_addr += tmp;
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             byte tmp = cpu->tmp + cpu->x + 1;    // without carry
             cpu->infer_addr += ((word)tmp) << 8; // without carry
         }
-        else if (4 == cpu->cycle++) // get word at inferred address
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
         {
             cpu->tmp = cpu->a;
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->tmp;
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
     case STA_IZY:
     {
-        if (0 == cpu->cycle++)
+        if (CYC_T1 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->pc++;
         }
-        else if (1 == cpu->cycle++)
+        else if (CYC_T2 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
         }
-        else if (2 == cpu->cycle++) // get low byte address
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
         }
-        else if (3 == cpu->cycle++) // get low byte address
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
         {
             cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
         }
-        else if (4 == cpu->cycle++) // get calculate Y offset address
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
         {
             word offset = (cpu->infer_addr & 0xff) + cpu->y;
             cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
             cpu->infer_addr += offset; // add offset to the address
         }
-        else if (5 == cpu->cycle++)
+        else if (CYC_T6 == cpu->cycle)
         {
+            cpu->cycle++;
             cpu->mem[cpu->infer_addr] = cpu->a;
-            cpu->cycle = 0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
 
-        /*************** MOVE ***************/
+    case LDX_IMM:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->pc++];
+            impl_ldx(cpu, val);
+            cpu->cycle = CYC_T0;
+        }
+        break;
     }
+    case LDX_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr];
+            impl_ldx(cpu, val);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case LDX_ZPY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->y; // increment by Y without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            impl_ldx(cpu, val);                   // perform OR
+            cpu->cycle = CYC_T0;                  // clear cycles
+        }
+        break;
+    }
+    case LDX_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            impl_ldx(cpu, val);                   // perform OR
+            cpu->cycle = CYC_T0;                  // clear cycles
+        }
+        break;
+    }
+    case LDX_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+            if (offset < 0xff)         // page boundary not crossed
+            {
+                byte val = cpu->mem[cpu->infer_addr];
+                impl_ldx(cpu, val);
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            byte val = cpu->mem[cpu->infer_addr];
+            impl_ldx(cpu, val);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case LDY_IMM:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->pc++];
+            impl_ldy(cpu, val);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case LDY_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr];
+            impl_ldy(cpu, val);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case LDY_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr]; // obtain value from memory
+            impl_ldy(cpu, val);                   // perform OR
+            cpu->cycle = CYC_T0;                  // clear cycles
+        }
+        break;
+    }
+    case LDY_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = cpu->mem[cpu->infer_addr]; // obtain value from inferred location
+            impl_ldy(cpu, val);                   // perform OR
+            cpu->cycle = CYC_T0;                  // clear cycles
+        }
+        break;
+    }
+    case LDY_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+            if (offset < 0xff)         // page boundary not crossed
+            {
+                byte val = cpu->mem[cpu->infer_addr];
+                impl_ldy(cpu, val);
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            byte val = cpu->mem[cpu->infer_addr];
+            impl_ldy(cpu, val);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case STX_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->x;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case STX_ZPY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->y; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->x;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case STX_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->x;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case STY_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = cpu->mem[cpu->pc++]; // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->y;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case STY_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->y;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case STY_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->mem[cpu->infer_addr] = cpu->y;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case TAX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_ldx(cpu, cpu->a);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+    case TXA:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_lda(cpu, cpu->x);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case TAY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_ldy(cpu, cpu->a);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+    case TYA:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_lda(cpu, cpu->y);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case TSX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_ldx(cpu, cpu->sp);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+    case TXS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp = impl_ld(cpu, cpu->x);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case PLA:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++; // pre-increment
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // fetch
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_lda(cpu, cpu->tmp);
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case PHA:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, 0x100 + cpu->sp, cpu->a);
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp--;           // post-decrement
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case PLP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++; // pre-increment
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // fetch
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sr = cpu->tmp;  // we do not want to modify flags!
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+
+    case PHP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, 0x100 + cpu->sp, cpu->sr);
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp--;           // post-decrement
+            cpu->cycle = CYC_T0; // EOS
+        }
+        break;
+    }
+        /*************** MOVE ***************/
+
+        /*************** JUMP ***************/
+    case BPL:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->n == 0)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->n == 0)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BMI:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->n == 1)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->n == 1)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BVC:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->v == 0)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->v == 0)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BVS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->v == 1)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->v == 1)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BCC:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->c == 0)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->c == 0)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BCS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->c == 1)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->c == 1)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BNE:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->z == 0)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->z == 0)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case BEQ:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
+            cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
+            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            {
+                if (cpu->z == 1)
+                    cpu->pc = cpu->infer_addr;
+                cpu->cycle = CYC_T0;
+            }
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            if (cpu->z == 1)
+                cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case BRK:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = 0;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, 0x100 + cpu->sp, cpu->pc); // lo byte
+            cpu->sp--;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, 0x100 + cpu->sp, cpu->pc >> 8); // hi byte
+            cpu->sp--;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, 0x100 + cpu->sp, cpu->sr);
+            cpu->sp--;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc = 0x0 | cpu->mem[V_IRQ_BRK];
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc |= ((word)cpu->mem[V_IRQ_BRK + 1]) << 8;
+        }
+        else if (CYC_T7 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->i = 1;          // interrupt is disabled for servicing
+            cpu->b = 1;          // break bit is set
+            cpu->cycle = CYC_T0; // clear interrupt cycle and fetch ISR instruction
+        }
+        break;
+    }
+
+    case RTI:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // post increment SP
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sr = cpu->tmp; // store
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // post increment SP
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc = cpu->tmp; // store hi byte
+            cpu->pc <<= 8;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // post increment SP
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc |= cpu->tmp; // store hi byte
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case RTS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // post increment SP
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = cpu->tmp; // store hi byte
+            cpu->infer_addr <<= 8;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->sp++;
+            cpu->tmp = impl_fetch(cpu, 0x100 + cpu->sp); // post increment SP
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= cpu->tmp; // store hi byte
+            cpu->cycle = CYC_T0;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc = cpu->infer_addr;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+            cpu->cycle == CYC_T0;
+        }
+        break;
+    }
+
+    case JMP_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // lo byte
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // hi byte
+            cpu->infer_addr |= ((word)cpu->tmp) << 8;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc = cpu->infer_addr;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case JMP_IND:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // lo byte
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // hi byte
+            cpu->infer_addr |= ((word)cpu->tmp) << 8;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc = impl_fetch(cpu, cpu->infer_addr);
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr++;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc |= ((word)impl_fetch(cpu, cpu->infer_addr)) << 8;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case BIT_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            byte val = impl_fetch(cpu, cpu->infer_addr);
+            cpu->tmp = cpu->a & val;
+            if (cpu->a == 0)
+                cpu->z = 1;
+            else
+                cpu->z = 0;
+            cpu->sr &= 0x3f; // unset top bits
+            cpu->sr |= cpu->tmp & 0xc0;
+            cpu->a = cpu->tmp;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case BIT_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= impl_fetch(cpu, cpu->pc++); // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)impl_fetch(cpu, cpu->pc++)) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->infer_addr);
+            cpu->tmp &= cpu->a;
+            if (cpu->a == 0)
+                cpu->z = 1;
+            else
+                cpu->z = 0;
+            cpu->sr &= 0x3f; // unset top bits
+            cpu->sr |= cpu->tmp & 0xc0;
+            cpu->a = cpu->tmp;
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case CLC:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->c = 0;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SEC:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->c = 1;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case CLD:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->d = 0;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SED:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->d = 1;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case CLI:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->i = 0;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SEI:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->i = 1;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+
+    case CLV:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->v = 0;          // obtain low byte of address
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+        /*************** JUMP ***************/
+
+        /************* ILLEGAL **************/
+    case SLO_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SLO_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SLO_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SLO_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SLO_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SLO_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SLO_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_asl(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_ora(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case RLA_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RLA_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RLA_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RLA_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RLA_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RLA_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RLA_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_rol(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_and(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case SRE_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SRE_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SRE_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SRE_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SRE_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SRE_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case SRE_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_lsr(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_eor(cpu, impl_fetch(cpu, cpu->infer_addr));
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case RRA_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RRA_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RRA_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case RRA_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RRA_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RRA_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case RRA_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_ror(cpu, impl_fetch(cpu, cpu->infer_addr)));
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), false);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case SAX_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, cpu->a & cpu->x);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SAX_ZPY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->y; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, cpu->a & cpu->x);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SAX_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, cpu->a & cpu->x);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case SAX_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, cpu->a & cpu->x);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case LAX_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case LAX_ZPY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->y; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case LAX_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case LAX_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case LAX_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case LAX_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            cpu->x = impl_fetch(cpu, cpu->infer_addr);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case DCP_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case DCP_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case DCP_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case DCP_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case DCP_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case DCP_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case DCP_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) - 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case ISC_ZP:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = impl_fetch(cpu, cpu->pc++); // obtain zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case ISC_ZPX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // origin zero page address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp += cpu->x; // increment by X without carry, always in zero page
+            cpu->infer_addr = cpu->tmp;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case ISC_ABS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0; // clear cycles
+        }
+        break;
+    }
+    case ISC_ABX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->x;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case ISC_ABY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case ISC_IZX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = 0x0;
+            byte tmp = cpu->tmp + cpu->x; // without carry
+            cpu->infer_addr += tmp;
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            byte tmp = cpu->tmp + cpu->x + 1;    // without carry
+            cpu->infer_addr += ((word)tmp) << 8; // without carry
+        }
+        else if (CYC_T5 == cpu->cycle++) // get word at inferred address
+        {
+            cpu->tmp = cpu->a;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case ISC_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->mem[cpu->pc++]; // get immediate
+        }
+        else if (CYC_T3 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = cpu->mem[cpu->tmp]; // store the lo address
+        }
+        else if (CYC_T4 == cpu->cycle++) // get low byte address
+        {
+            cpu->infer_addr = ((word)cpu->mem[cpu->tmp++]) << 8; // store the hi address, note zero page is not crossed
+        }
+        else if (CYC_T5 == cpu->cycle++) // get calculate Y offset address
+        {
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_write(cpu, cpu->infer_addr, impl_fetch(cpu, cpu->infer_addr) + 1);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->infer_addr), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case ANC:
+    case ANC_:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
+            impl_and(cpu, cpu->tmp);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case ALR:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
+            impl_and(cpu, cpu->tmp);
+            impl_asl(cpu, cpu->a);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case ARR:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
+            impl_and(cpu, cpu->tmp);
+            impl_lsr(cpu, cpu->a);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case XAA:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_lda(cpu, cpu->x);
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
+            impl_and(cpu, cpu->tmp);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case LAX:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = impl_fetch(cpu, cpu->pc++); // get immediate
+            impl_lda(cpu, cpu->tmp);
+            impl_ldx(cpu, cpu->tmp);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case AXS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->tmp = cpu->a;
+            impl_and(cpu, cpu->x);
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->pc++), true);
+            impl_ldx(cpu, cpu->a);
+            cpu->a = cpu->tmp;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    case SBC:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            impl_adc_sbc(cpu, impl_fetch(cpu, cpu->pc++), true);
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+
+    // following are implemented as NOP
+    case AHX_IZY:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T6 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case AHX_ABY:
+    case SHY:
+    case SHX:
+    case TAS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            break;
+        }
+        else if (CYC_T5 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+    case LAS:
+    {
+        if (CYC_T1 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->pc++;
+        }
+        else if (CYC_T2 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr = 0x0;
+            cpu->infer_addr |= cpu->mem[cpu->pc++]; // obtain low byte of address
+        }
+        else if (CYC_T3 == cpu->cycle)
+        {
+            cpu->cycle++;
+            cpu->infer_addr |= ((word)cpu->mem[cpu->pc++]) << 8; // obtain high byte and calculate address
+        }
+        else if (CYC_T4 == cpu->cycle)
+        {
+            cpu->cycle++;
+            // calculate effective address
+            word offset = (cpu->infer_addr & 0xff) + cpu->y;
+            cpu->infer_addr &= 0xfe00; // clear lo byte, and last bit of hi byte
+            cpu->infer_addr += offset; // add offset to the address
+        }
+        else if (CYC_T5 == cpu->cycle++) // page boundary crossed
+        {
+            cpu->a = impl_fetch(cpu, cpu->infer_addr);
+            impl_and(cpu, cpu->sp);
+            cpu->x = cpu->a;
+            cpu->sp = cpu->a;
+            cpu->cycle = CYC_T0;
+        }
+        break;
+    }
+        /************* ILLEGAL **************/
+    }
+    return 1;
 }
-
-// int cpu_exec(cpu_6502 *cpu)
-// {
-//     switch (cpu->mem[cpu->pc])
-//     {
-//     case ADC_IMM:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: ADC_IMM ");
-// #endif
-//         int num_cycles = 2;
-//         cpu->pc++; // prepare for next operand
-//         byte val = cpu->mem[cpu->pc];
-//         // do the addition, take care of BCD
-//         impl_adc(cpu, val);
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ADC_ZP:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: ADC_ZPG ");
-// #endif
-//         int num_cycles = 3;
-//         cpu->pc++; // prepare for next operand
-//         byte val = cpu->mem[cpu->mem[cpu->pc]];
-//         // do the addition, take care of BCD
-//         impl_adc(cpu, val);
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ADC_ABS:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: ADC_MEM ");
-// #endif
-//         int num_cycles = 4;
-//         cpu->pc++; // prepare for next operand
-//         word addr = cpu->mem[cpu->pc];
-//         cpu->pc++;
-//         addr |= ((word)cpu->mem[cpu->pc]) << 8;
-//         byte val = cpu->mem[addr];
-//         // do the addition, take care of BCD
-//         impl_adc(cpu, val);
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ASL_ZPG:
-//     {
-//         int num_cycles = 5;
-//         cpu->pc++;                    // prepare for next operand
-//         byte val = cpu->mem[cpu->pc]; // from ZPG address
-//         cpu->c = (val & 0x80) >> 7;   // get bit 7 and store it in carry
-//         cpu->mem[cpu->pc] <<= 1;      // shift the value to left by 1
-//         if (!(cpu->mem[cpu->pc]))
-//             cpu->z = 1;
-//         if (cpu->mem[cpu->pc] & 0x80)
-//             cpu->n = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ASL_A:
-//     {
-//         int num_cycles = 2;
-//         cpu->c = (cpu->a & 0x80) >> 7; // get bit 7 and store it in carry
-//         cpu->a <<= 1;                  // shift accumulator to left by 1
-//         if (!(cpu->a))
-//             cpu->z = 1;
-//         if (cpu->a & 0x80)
-//             cpu->n = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ASL_MEM:
-//     {
-//         int num_cycles = 6;
-//         cpu->pc++;                     // prepare for next operand
-//         word addr = cpu->mem[cpu->pc]; // LO addr
-//         cpu->pc++;
-//         addr += cpu->mem[cpu->pc] * 0x16; // HI addr
-//         cpu->c = (0x80 & cpu->mem[addr]) >> 7;   // set carry
-//         cpu->mem[addr] <<= 1;             // shift left by 1
-//         byte val = cpu->mem[addr];
-//         if (!val) // check zero flag
-//             cpu->z = 1;
-//         if (val & 0x80) // check negative flag
-//             cpu->n = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case BRK:
-//     {
-//         int num_cycles = 7;
-//         cpu->i = 1;                                    // indicate interrupt
-//         word tmp = cpu->pc + 2;                        // cycle 1
-//         cpu->mem[cpu->sp | 0x100] = tmp & 0xff;        // 2
-//         cpu->sp--;                                     // 3
-//         cpu->mem[cpu->sp | 0x100] = (tmp >> 8) & 0xff; // 4
-//         cpu->sp--;                                     // 5
-//         cpu->mem[cpu->sp | 0x100] = cpu->sr;           // 6
-//         cpu->sp--;                                     // 7
-//         usleep(num_cycles * CPU_CYCLE_USEC);           // hacky way to do it but assume that the host CPU is much faster
-//         break;
-//     }
-
-//     case JMP_IMM:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: JMP_IMM ");
-// #endif
-//         int num_cycles = 3;
-//         cpu->pc++;                     // prepare for next operand
-//         word addr = cpu->mem[cpu->pc]; // low byte of immediate addr
-//         cpu->pc++;
-//         addr += cpu->mem[cpu->pc] * 256; // high byte of immediate addr
-//         cpu->pc = addr;
-// #ifdef MOS_DEBUG
-//         printf("Loc: 0x%04x\n", addr);
-// #endif
-//         cpu->last_jmp = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case JMP_INDIRECT:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: JMP_INDIRECT ");
-// #endif
-//         int num_cycles = 5;
-//         cpu->pc++;                     // prepare for next operand
-//         word addr = cpu->mem[cpu->pc]; // low byte of immediate addr
-//         cpu->pc++;
-//         addr += cpu->mem[cpu->pc] * 256; // high byte of immediate addr
-// #ifdef MOS_DEBUG
-//         printf("Addr: 0x%04x ", addr);
-// #endif
-//         addr = cpu->mem[addr] + cpu->mem[addr + 1] * 256;
-//         cpu->pc = addr;
-// #ifdef MOS_DEBUG
-//         printf("Loc: 0x%04x\n", addr);
-// #endif
-//         cpu->last_jmp = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case NOP:
-//     {
-// #ifdef MOS_DEBUG
-//         printf("Instruction: NOP\n");
-// #endif
-//         int num_cycles = 2;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ORA_X_IND:
-//     {
-//         int num_cycles = 6;
-//         cpu->pc++;                                      // prepare for next operand
-//         byte ll = cpu->mem[cpu->pc];                    // obtain the index
-//         ll += cpu->x;                                   // without carry
-//         word addr = cpu->mem[ll] & 0x00ff;              // get LO
-//         addr |= (((word)cpu->mem[ll++]) << 8) & 0xff00; // get HI, remember it is in zpg so it wraps around!
-//         cpu->a |= cpu->mem[addr];                       // OR the data
-//         if ((cpu->a) & 0x80)                            // negative flag, 2's compliment
-//             cpu->n = 1;
-//         if (!(cpu->a)) // zero flag
-//             cpu->z = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC); // hacky way to do it but assume that the host CPU is much faster
-//         break;
-//     }
-
-//     case ORA_ZPG:
-//     {
-//         int num_cycles = 3;
-//         cpu->pc++; // prepare for next operand
-//         cpu->a |= cpu->mem[cpu->pc];
-//         if ((cpu->a) & 0x80) // negative flag, 2's compliment
-//             cpu->n = 1;
-//         if (!(cpu->a)) // zero flag
-//             cpu->z = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ORA_MEM:
-//     {
-//         int num_cycles = 0;
-//         cpu->pc++;                     // prepare for next operand
-//         word addr = cpu->mem[cpu->pc]; // LO addr
-//         cpu->pc++;
-//         addr += cpu->mem[cpu->pc] * 0x16; // HI addr
-//         cpu->a |= cpu->mem[addr];
-//         if (!(cpu->a))
-//             cpu->z = 1;
-//         if (cpu->a & 0x80)
-//             cpu->n = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case ORA_IMM:
-//     {
-//         int num_cycles = 2;
-//         cpu->pc++; // prepare for next operand
-//         cpu->a |= cpu->mem[cpu->pc];
-//         if ((cpu->a) & 0x80) // negative flag, 2's compliment
-//             cpu->n = 1;
-//         if (!(cpu->a)) // zero flag
-//             cpu->z = 1;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     case PHP:
-//     {
-//         int num_cycles = 3;
-//         cpu->mem[cpu->sp | 0x100] = cpu->sr;
-//         cpu->sp--;
-//         usleep(num_cycles * CPU_CYCLE_USEC);
-//         break;
-//     }
-
-//     default:
-//     {
-//         printf("Abort trap! Instruction invalid/not implemented!\n");
-//         break;
-//     }
-//     }
-//     if (!(cpu->last_jmp))
-//     {
-//         cpu->pc++; // prepare for next instruction/operand
-//     }
-//     cpu->last_jmp = 0; // clear the jump
-//     return 0;
-// }
-
-// // set program counter to RESET vector address
-// void cpu_reset(cpu_6502 *cpu)
-// {
-//     cpu->sr = 0;
-//     cpu->sp = 0xff; // stack pointer starts at the bottom
-//     cpu->a = 0;
-//     cpu->x = 0;
-//     cpu->y = 0;
-//     cpu->last_jmp = 0;
-//     cpu->pc = cpu->mem[V_RESET] + cpu->mem[V_RESET + 1] * 256;
-// }
-
-/*
-case INSTR:
-{
-    int num_cycles = ;
-    cpu->pc++; // prepare for next operand
-
-    usleep(num_cycles * CPU_CYCLE_USEC);
-    break;
-}
-*/

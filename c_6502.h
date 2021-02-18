@@ -16,7 +16,15 @@ const word V_RESET = 0xfffc; // mem loc for reset
 
 const word V_IRQ_BRK = 0xfffe; // mem loc for IRQ
 
-
+const byte CYC_IN = 0;
+const byte CYC_T0 = 1;
+const byte CYC_T1 = 2;
+const byte CYC_T2 = 3;
+const byte CYC_T3 = 4;
+const byte CYC_T4 = 5;
+const byte CYC_T5 = 6;
+const byte CYC_T6 = 7;
+const byte CYC_T7 = 8;
 
 typedef struct __attribute__((packed))
 {
@@ -44,13 +52,12 @@ typedef struct __attribute__((packed))
     byte mem[MAX_MEM_SZ];
     byte nmi; // NMI signal
     byte irq; // IRQ signal
-    byte halt; // indicate HLT/KIL
+    byte rst; // RST signal
     byte instr; // current instruction
     char cycle; // current cycle
     char irq_cycle; // interrupt cycle
     word infer_addr; // inferred address, temporary storage only
     byte tmp; // temporary register
-    byte last_jmp; // indicate if last instruction was a jump
 } cpu_6502;
 
 /**
@@ -301,24 +308,24 @@ typedef enum
      * @brief STX, {adr}:= X
      * --------
      */ 
-    STX_ZP  = 0xa6,
-    STX_ZPY = 0xb6,
-    STX_ABS = 0xae,
+    STX_ZP  = 0xa6 - 0x20,
+    STX_ZPY = 0xb6 - 0x20,
+    STX_ABS = 0xae - 0x20,
     /**
      * @brief LDY, Y:= {adr}
      * N-----Z-
      */ 
     LDY_IMM = 0xa2 - 0x02,
     LDY_ZP  = 0xa6 - 0x02,
-    LDY_ZPY = 0xb6 - 0x02,
+    LDY_ZPX = 0xb6 - 0x02,
     LDY_ABS = 0xae - 0x02,
-    LDY_ABY = 0xbe - 0x02,
+    LDY_ABX = 0xbe - 0x02,
     /**
      * @brief STY, {adr}:= Y
      * --------
      */ 
     STY_ZP  = 0xa6 - 0x22,
-    STY_ZPY = 0xb6 - 0x22,
+    STY_ZPX = 0xb6 - 0x22,
     STY_ABS = 0xae - 0x22,
     /**
      * @brief Transfer commands, T{1}{2}, {2}:= {1}
@@ -586,6 +593,19 @@ int cpu_exec(cpu_6502 *cpu);
  * 
  */
 void cpu_reset(cpu_6502 *cpu);
+/**
+ * @brief Assert a non-maskable interrupt (in hardware: NMI line goes high to low)
+ * 
+ * @param cpu pointer to 6502 struct
+ */
+void cpu_nmi(cpu_6502 *cpu);
+/**
+ * @brief Assert or deassert IRQ
+ * 
+ * @param cpu pointer to 6502 struct
+ * @param val IRQ pin value (high -> no interrupt, low -> interrupt)
+ */
+void cpu_irq(cpu_6502 *cpu, byte val);
 #ifdef __cplusplus
 }
 #endif
