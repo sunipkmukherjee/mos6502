@@ -550,13 +550,11 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->infer_addr += offset; // add offset to the address
             if (offset < 0xff)         // page boundary not crossed
             {
-                byte val = cpu->mem[cpu->infer_addr];
                 cpu->cycle = CYC_T0;
             }
         }
         else if (CYC_T5 == cpu->cycle++) // page boundary crossed
         {
-            byte val = cpu->mem[cpu->infer_addr];
             cpu->cycle = CYC_T0;
         }
         break;
@@ -4262,7 +4260,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->n == 0)
                     cpu->pc = cpu->infer_addr;
@@ -4290,7 +4288,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->n == 1)
                     cpu->pc = cpu->infer_addr;
@@ -4318,7 +4316,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->v == 0)
                     cpu->pc = cpu->infer_addr;
@@ -4346,7 +4344,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->v == 1)
                     cpu->pc = cpu->infer_addr;
@@ -4374,7 +4372,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->c == 0)
                     cpu->pc = cpu->infer_addr;
@@ -4402,7 +4400,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->c == 1)
                     cpu->pc = cpu->infer_addr;
@@ -4430,7 +4428,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->z == 0)
                     cpu->pc = cpu->infer_addr;
@@ -4458,7 +4456,7 @@ int cpu_exec(cpu_6502 *cpu)
             cpu->cycle++;
             cpu->tmp = impl_fetch(cpu, cpu->pc); // fetch offset
             cpu->infer_addr = impl_sgn_ofst(cpu->pc, cpu->tmp);
-            if (cpu->pc & 0xff00 == cpu->infer_addr & 0xff00) // same page
+            if ((cpu->pc & 0xff00) == (cpu->infer_addr & 0xff00)) // same page
             {
                 if (cpu->z == 1)
                     cpu->pc = cpu->infer_addr;
@@ -4595,7 +4593,7 @@ int cpu_exec(cpu_6502 *cpu)
         {
             cpu->cycle++;
             cpu->pc++;
-            cpu->cycle == CYC_T0;
+            cpu->cycle = CYC_T0;
         }
         break;
     }
