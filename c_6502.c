@@ -143,7 +143,7 @@ static inline void impl_adc_sbc(cpu_6502 *cpu, byte val, bool sbc)
         byte b7 = ((b & 0x80) == 0x80);
         byte msn3 = ((msn & 0x8) == 0x8);
         byte c7 = (msn3 & ((a7 ^ b7) | (a7 & b7)));
-        tmp |= msn & 0x70; // top three bits
+        tmp |= (msn & 0x7) << 4; // top three bits
         tmp |= (((a7 ^ b7 ^ msn3) << 7) & 0x80);
         c = c7;
         cpu->v = (lsn >> 4) & 0x1;
