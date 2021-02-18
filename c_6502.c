@@ -67,6 +67,7 @@ static inline void instr_fetch(cpu_6502 *cpu)
     {
         cpu->cycle++;
         cpu->instr = impl_fetch(cpu, cpu->pc);
+        cpu->instr_ptr = cpu->pc;
     }
     // printf("%s: PC: 0x%04x | INSTR: 0x%02x | Cycle: %d\n", __func__, cpu->pc, cpu->instr, cpu->cycle);
 }
