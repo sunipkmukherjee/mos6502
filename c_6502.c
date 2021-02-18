@@ -134,13 +134,20 @@ static inline void impl_adc_sbc(cpu_6502 *cpu, byte val, bool sbc)
     }
     else // binary mode
     {
-        short tmp2 = a + b + c;
-        c = tmp2 & 0x100;
-        tmp = tmp2 & 0xff;
-        if (tmp2 < -128 || tmp2 > 127)
-            cpu->v = 1;
-        else
-            cpu->v = 0;
+        byte lsn = ((a & 0xf) + (b & 0xf) + c);
+        byte c3 = (lsn >> 4) & 0x1;
+        tmp = lsn & 0xf;
+
+        byte msn = ((a & 0x7) + (b & 0x7) + c3);
+        byte a7 = ((a & 0x80) == 0x80);
+        byte b7 = ((b & 0x80) == 0x80);
+        byte msn3 = ((msn & 0x8) == 0x8);
+        byte c7 = (msn3 & ((a7 ^ b7) | (a7 & b7)));
+        tmp |= msn & 0x70; // top three bits
+        tmp |= (((a7 ^ b7 ^ msn3) << 7) & 0x80);
+        c = c7;
+        cpu->v = (lsn >> 4) & 0x1;
+        cpu->v ^= msn3;
     }
     cpu->z = (tmp == 0x0);
     cpu->n = ((tmp & 0x80) == 0x80);
