@@ -44,7 +44,7 @@ extern "C"
                 unsigned z : 1; // zero
                 unsigned i : 1; // interrupt disable, this bit is set on power up
                 unsigned d : 1; // decimal
-                unsigned b : 1; // break
+                unsigned b : 1; // break, not physical bit. Set only when PHP/BRK occurs when pushing to SP, cleared when NMI/IRQ pushes SR to SP
                 unsigned rsvd : 1;
                 unsigned v : 1; // overflow
                 unsigned n : 1; // negative
