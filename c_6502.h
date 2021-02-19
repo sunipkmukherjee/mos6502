@@ -44,6 +44,7 @@ extern "C"
                 unsigned z : 1; // zero
                 unsigned i : 1; // interrupt disable, this bit is set on power up
                 unsigned d : 1; // decimal
+                // https://wiki.nesdev.com/w/index.php/Status_flags#The_B_flag
                 unsigned b : 1; // break, not physical bit. Set only when PHP/BRK occurs when pushing to SP, cleared when NMI/IRQ pushes SR to SP
                 unsigned rsvd : 1;
                 unsigned v : 1; // overflow
@@ -192,14 +193,14 @@ extern "C"
      * N-----ZC
      */
         CPX_IMM = 0xe0,
-        CPX_ZPX = 0xe4,
+        CPX_ZP  = 0xe4,
         CPX_ABS = 0xec,
         /**
      * @brief CPY Y, Y - {adr}
      * N-----ZC
      */
         CPY_IMM = 0xc0,
-        CPY_ZPX = 0xc4,
+        CPY_ZP  = 0xc4,
         CPY_ABS = 0xcc,
         /**
      * @brief DEC {adr}:= {adr} - 1
