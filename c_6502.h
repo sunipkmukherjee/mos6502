@@ -53,10 +53,15 @@ extern "C"
             byte sr;
         };
 
-        byte mem[MAX_MEM_SZ];
+        byte mem[MAX_MEM_SZ]; // memory region
+
+        byte clk;        // clock signal
         byte nmi;        // NMI signal
         byte irq;        // IRQ signal
         byte rst;        // RST signal
+        byte rw;         // Read/~Write signal (active low write)
+
+        // internal registers and cycles
         byte instr;      // current instruction
         char cycle;      // current cycle
         char irq_cycle;  // interrupt cycle
