@@ -54,17 +54,72 @@ extern "C"
         };
 
         byte mem[MAX_MEM_SZ]; // memory region
-
-        byte clk;        // clock signal
-        byte nmi;        // NMI signal
-        byte irq;        // IRQ signal
-        byte rst;        // RST signal
-        byte rw;         // Read/~Write signal (active low write)
+        byte map_rw[0x100];   // indicate if map supports read and write, set to 1 to make page unwritable
+        union
+        {
+            struct __attribute__((packed))
+            {
+                byte clk : 1; // clock input
+                /**
+                 * @brief Sampled on PH2, and will begin the appropriate interrupt routine
+                 * in PH1 
+                 */
+                byte nmi : 1; // NMI signal, negedge
+                byte irq : 1; // IRQ signal, active low
+                /**
+                 * @brief This input is used to reset or start the microprocessor from a
+                 * power down condition. During the time that this line is held low,
+                 * writing to or from the microprocessor is inhibited. When a positive
+                 * edge is detected on the input, the microprocessor will immediately
+                 * begin the reset sequence.
+                 * After a system initialization time of six clock cycles, the mask
+                 * interrupt flag will be set and the microprocessor will load the
+                 * program counter from the memory vector locations FFFC and
+                 * FFFD. This is the start location for program control. After Vcc
+                 * reaches 4.75 volts in a power up routine, reset must be held low
+                 * for at least two clock cycles. At this time the R/W and (SYNC)
+                 * signal will become valid.
+                 * When the reset signal goes high following these two clock cycles,
+                 * the microprocessor will proceed with the normal reset procedure
+                 * detailed above.
+                 * 
+                 */
+                byte rst : 1;
+                byte rw : 1; // Read/~Write signal (active low write)
+                /**
+                 * @brief This input signal allows the user to single cycle the
+                 * microprocessor on all cycles except write cycles. A negative
+                 * transition to the low state during or coincident with phase one (0,)
+                 * and up to 100ns after phase two (02) will halt the microprocessor
+                 * with the output address lines reflecting the current address being
+                 * fetched. This condition will remain through a subsequent phase
+                 * two in which the Ready signal is low. This feature allows
+                 * microprocessor interfacing with low speed PROMS as well as fast
+                 * (max. 2 cycle) Direct Memory Access (DMA). If Ready is low
+                 * during a write cycle, it is ignored until the following read operation.
+                 * 
+                 */
+                byte rdy : 1; // rdy signal
+                /**
+                 * @brief sync (goes high during ph1 of fetch, and remains high for the cycle)
+                 * If RDY is pulled low during PH1, the processor halts until RDY goes HIGH
+                 */
+                byte sync : 1;
+                byte ph1 : 1;    // phase 1 clock
+                byte ph2 : 1;    // phase 2 clock
+                byte so : 1;     // set overflow (active low)
+                byte unused : 6; // unused
+            };
+            word wires;
+        };
 
         // internal registers and cycles
         byte instr;      // current instruction
         char cycle;      // current cycle
         char irq_cycle;  // interrupt cycle
+        byte has_nmi;    // indicate NMI has occurred
+        byte has_irq;    // indicate IRQ has occurred
+        byte has_rdy;    // indicate RDY has been pulled low
         word infer_addr; // inferred address, temporary storage only
         word instr_ptr;  // last fetch PC, for debug
         byte tmp;        // temporary register
@@ -198,14 +253,14 @@ extern "C"
      * N-----ZC
      */
         CPX_IMM = 0xe0,
-        CPX_ZP  = 0xe4,
+        CPX_ZP = 0xe4,
         CPX_ABS = 0xec,
         /**
      * @brief CPY Y, Y - {adr}
      * N-----ZC
      */
         CPY_IMM = 0xc0,
-        CPY_ZP  = 0xc4,
+        CPY_ZP = 0xc4,
         CPY_ABS = 0xcc,
         /**
      * @brief DEC {adr}:= {adr} - 1
